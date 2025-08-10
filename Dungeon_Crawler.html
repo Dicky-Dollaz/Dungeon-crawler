@@ -686,9 +686,23 @@ const MapScreen = (function(){
     const mapTitle = document.createElement('div'); mapTitle.textContent='Dungeon Level '; const lvlLabel = document.createElement('span'); lvlLabel.id='lvlLabel'; lvlLabel.textContent='1'; mapTitle.append(lvlLabel);
     const coord = document.createElement('div'); coord.id='coordLabel'; coord.textContent='Room —';
     mapHead.append(mapTitle, coord);
-    const canvasWrap = document.createElement('div'); canvasWrap.style.border='3px solid #4a356c'; canvasWrap.style.borderRadius='12px'; canvasWrap.style.background='#110a1b'; canvasWrap.style.display='grid'; canvasWrap.style.placeItems='center'; canvasWrap.style.overflow='hidden'; canvasWrap.style.maxHeight='72vh'; canvasWrap.style.height = 'clamp(420px, 72vh, 760px)'; // NEW: ensure non-zero height
 
-    const canvas = document.createElement('canvas'); canvas.id='map'; canvasWrap.append(canvas);
+    const canvasWrap = document.createElement('div');
+    canvasWrap.style.border='3px solid #4a356c';
+    canvasWrap.style.borderRadius='12px';
+    canvasWrap.style.background='#110a1b';
+    canvasWrap.style.display='grid';
+    canvasWrap.style.placeItems='center';
+    canvasWrap.style.overflow='hidden';
+    canvasWrap.style.maxHeight='72vh';
+    canvasWrap.style.height = 'clamp(420px, 72vh, 760px)';
+
+    const canvas = document.createElement('canvas'); canvas.id='map';
+    // FIX: ensure the canvas fills its wrapper so layout size is non-zero
+    canvas.style.width = '100%';
+    canvas.style.height = '100%';
+    canvasWrap.append(canvas);
+
     const mapFoot = document.createElement('div'); mapFoot.style.opacity='.8'; mapFoot.textContent='Doors connect rooms. Secret doors need Search (E).';
     mapWrap.append(mapHead, canvasWrap, mapFoot);
 
@@ -715,11 +729,14 @@ const MapScreen = (function(){
     invBtn.onclick = ()=> alert(JSON.stringify(loadInventory(hero), null, 2));
     spendBtn.onclick = ()=> onSpendPoints && onSpendPoints();
 
-    /* DUNGEON IMPLEMENTATION (trimmed from your file, with new-room MP +10 and encounter hook) */
+    /* DUNGEON IMPLEMENTATION */
     const ctx = canvas.getContext('2d'); ctx.imageSmoothingEnabled=false;
     const WORLD = {x:0,y:0,w:1600,h:1000};
     const MIN_LEAF_W=260, MIN_LEAF_H=200, MAX_DEPTH=4;
     let animReq = 0;
+
+    // FIX: clamp DPR to a sane range
+    const getDPR = ()=> Math.max(1, Math.min(3, window.devicePixelRatio || 1));
 
     const S = {
       level:1, rooms:[], adj:new Map(),
@@ -742,8 +759,8 @@ const MapScreen = (function(){
         splitLeaf({x:cut, y:L.y, w:L.x+L.w-cut, h:L.h}, depth+1, out);
       }else{
         const cut = randRange(L.y+MIN_LEAF_H, L.y+L.h-MIN_LEAF_H);
-        splitLeaf({x:L.x, y:L.y, w:L.w, h:cut-L.y}, depth+1, out);
         splitLeaf({x:L.x, y:cut, w:L.w, h:L.y+L.h-cut}, depth+1, out);
+        splitLeaf({x:L.x, y:L.y, w:L.w, h:cut-L.y}, depth+1, out);
       }
     }
     function makeRooms(leaves){
@@ -823,6 +840,7 @@ const MapScreen = (function(){
     }
     function computeView(){
       const rect = canvas.getBoundingClientRect();
+      if (rect.width < 2 || rect.height < 2) return; // FIX: avoid zero-size math
       const pad = 40; const worldW = WORLD.w + pad*2, worldH = WORLD.h + pad*2;
       const s = Math.min(rect.width/worldW, rect.height/worldH);
       const tx = (rect.width - s*(WORLD.w))/2 + s*WORLD.x;
@@ -879,7 +897,7 @@ const MapScreen = (function(){
       if(t>=1){
         S.curId = S.anim.ids[S.anim.seg+1];
         S.visited.add(S.curId);
-        onEnterRoom(S.curId); // note: *after* visited add
+        onEnterRoom(S.curId);
         S.anim.seg++;
         if(S.anim.seg >= S.anim.ids.length-1){ S.anim=null; lastTS=null; draw(); return; }
         stepSeg();
@@ -890,7 +908,7 @@ const MapScreen = (function(){
     function onEnterRoom(id){
       const r = roomById(id);
 
-      // NEW: per-new-room +10 MP (only once per unique room)
+      // per-new-room +10 MP
       if(!S.entered.has(id)){
         S.entered.add(id);
         const m = computeMaxFromStats(hero.stats);
@@ -901,7 +919,6 @@ const MapScreen = (function(){
         SFX.bleep(760);
       }
 
-      // Secrets auto-reveal chance
       const secrets = (S.adj.get(id)||[]).filter(e=>e.type==='secret' && !e.revealed);
       if(secrets.length && Math.random()<0.35){
         const e = secrets[Math.floor(Math.random()*secrets.length)];
@@ -949,11 +966,17 @@ const MapScreen = (function(){
     }
 
     function draw(){
-      const dpr = window.devicePixelRatio||1;
       const rect = canvas.getBoundingClientRect();
-      if(canvas.width !== Math.floor(rect.width*dpr) || canvas.height !== Math.floor(rect.height*dpr)){
-        canvas.width = Math.floor(rect.width*dpr); canvas.height=Math.floor(rect.height*dpr);
-        ctx.setTransform(dpr,0,0,dpr,0,0); computeView();
+      // FIX: if layout hasn’t given the canvas size yet, bail out gracefully
+      if(rect.width < 2 || rect.height < 2) return;
+
+      const dpr = getDPR();
+      const targetW = Math.max(1, Math.floor(rect.width  * dpr));
+      const targetH = Math.max(1, Math.floor(rect.height * dpr));
+      if(canvas.width !== targetW || canvas.height !== targetH){
+        canvas.width = targetW; canvas.height = targetH;
+        ctx.setTransform(dpr,0,0,dpr,0,0);
+        computeView();
       }
 
       const w=rect.width, h=rect.height;
@@ -989,7 +1012,7 @@ const MapScreen = (function(){
         const RS = worldToScreen(r.x, r.y); const RE = worldToScreen(r.x+r.w, r.y+r.h);
         const rx=RS.x, ry=RS.y, rw=RE.x-RS.x, rh=RE.y-RS.y;
         const isHover = (S.hoverId===r.id && (S.hoverPath || S.visited.has(r.id)));
-        if(vis.has(r.id)){
+        if(visibleSet().has(r.id)){
           ctx.fillStyle="#231b34"; ctx.fillRect(rx,ry,rw,rh);
           if(isHover){ ctx.save(); ctx.shadowColor = S.hoverReachable ? "#63d297" : "#ff5868"; ctx.shadowBlur=18; ctx.fillStyle="rgba(255,255,255,0.06)"; ctx.fillRect(rx,ry,rw,rh); ctx.restore(); }
           ctx.strokeStyle="#6b4e10"; ctx.lineWidth=6; ctx.strokeRect(rx,ry,rw,rh);
@@ -1059,20 +1082,21 @@ const MapScreen = (function(){
       let best=cand[0], dBest=Infinity; cand.forEach(o=>{ const d=Math.hypot(o.cx-cur.cx,o.cy-cur.cy); if(d<dBest){ dBest=d; best=o; } });
       beginMove([S.curId, best.id]);
     }
-    function fitCanvas(){
-  const dpr = window.devicePixelRatio||1;
-  const wrapRect = canvasWrap.getBoundingClientRect();
-  if (wrapRect.width === 0 || wrapRect.height === 0) { // NEW: layout guard
-    requestAnimationFrame(fitCanvas);
-    return;
-  }
-  canvas.width  = Math.floor(wrapRect.width * dpr);
-  canvas.height = Math.floor(wrapRect.height * dpr);
-  ctx.setTransform(dpr,0,0,dpr,0,0);
-  computeView();
-  draw();
-}
 
+    // FIX: robust canvas sizing with layout guard
+    function fitCanvas(){
+      const wrapRect = canvasWrap.getBoundingClientRect();
+      if (wrapRect.width < 2 || wrapRect.height < 2) {
+        requestAnimationFrame(fitCanvas);
+        return;
+      }
+      const dpr = getDPR();
+      canvas.width  = Math.max(1, Math.floor(wrapRect.width  * dpr));
+      canvas.height = Math.max(1, Math.floor(wrapRect.height * dpr));
+      ctx.setTransform(dpr,0,0,dpr,0,0);
+      computeView();
+      draw();
+    }
 
     function generate(levelUp=false){
       if(levelUp) S.level++;
@@ -1088,17 +1112,18 @@ const MapScreen = (function(){
       const m = computeMaxFromStats(hero.stats);
       hero.hp = m.maxHP; hero.mp = m.maxMP; saveHeroActive(hero);
     }
-    requestAnimationFrame(() => {  // NEW: wait for layout
-  fitCanvas();
-  generate(false);
-});
 
+    // FIX: wait a frame for layout, then size + generate
+    requestAnimationFrame(() => { fitCanvas(); generate(false); });
 
     // events
     canvas.addEventListener('mousemove', onMouseMove);
     canvas.addEventListener('click', onClick);
     window.addEventListener('resize', fitCanvas);
-    document.addEventListener('keydown', onKeyDown);
+
+    // FIX: also react to container/layout changes
+    const ro = new ResizeObserver(()=>{ fitCanvas(); });
+    ro.observe(canvasWrap);
 
     return {
       destroy(){
@@ -1106,6 +1131,7 @@ const MapScreen = (function(){
         canvas.removeEventListener('mousemove', onMouseMove);
         canvas.removeEventListener('click', onClick);
         window.removeEventListener('resize', fitCanvas);
+        ro.disconnect();
         document.removeEventListener('keydown', onKeyDown);
       },
       refreshHeroPanel
@@ -1114,6 +1140,7 @@ const MapScreen = (function(){
 
   return { mount };
 })();
+
 
 /* ===========================
    MODULE: Combat Screen
