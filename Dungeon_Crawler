@@ -1,0 +1,1464 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>The Dungeon Below — unified</title>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#e9e5d0; --bg:#120e1c; --panel:#241a33; --rim:#6b4e10; --gold:#f6d26b;
+    --emerald:#63d297; --crimson:#ff5868; --steel:#a7b2c3; --amber:#ffd966;
+    --shadow:0 10px 0 #0a0710, 0 14px 0 #07050b;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0; background:
+      radial-gradient(1200px 700px at 20% -10%, #2b1f45 0%, transparent 60%),
+      radial-gradient(1200px 700px at 120% 110%, #201632 0%, transparent 60%),
+      var(--bg);
+    color:var(--ink); font-family:"VT323", monospace; letter-spacing:.2px; image-rendering:pixelated;
+  }
+  .crt::after{
+    content:""; position:fixed; inset:0; pointer-events:none;
+    background:repeating-linear-gradient(0deg, rgba(255,255,255,.03) 0 2px, transparent 2px 4px);
+    mix-blend-mode:soft-light;
+  }
+  #root{max-width:1220px; margin:18px auto; padding:10px;}
+  .title{font-family:"Press Start 2P"; color:var(--gold); font-size:20px; text-shadow:2px 2px 0 #6b4e10, 4px 4px 0 #2a1d3c;}
+  .panel{
+    background:linear-gradient(#2e2147,#1b1328);
+    border:4px solid var(--rim); border-image: linear-gradient(180deg,#a9842b,#6b4e10) 1;
+    border-radius:14px; padding:12px; box-shadow:var(--shadow);
+  }
+  .btn{
+    font-family:"Press Start 2P"; font-size:12px; letter-spacing:1px;
+    background:#211632; color:var(--ink); border:3px solid #4a356c; border-radius:12px; padding:10px 12px; cursor:pointer;
+  }
+  .btn:active{transform:translateY(2px)} .btn.small{font-size:11px; padding:8px 10px}
+  .btn.alt{border-color:#6b4e10} .btn.warn{border-color:#7f3b4a}
+  .btn.disabled{opacity:.5; pointer-events:none}
+  .grid2{display:grid; grid-template-columns: 1fr 1fr; gap:12px}
+  .grid3{display:grid; grid-template-columns: 320px 1fr; gap:12px}
+  @media (max-width: 980px){ .grid3{grid-template-columns:1fr} .grid2{grid-template-columns:1fr} }
+
+  /* Overlay (toasts / modals) */
+  .overlay{ position:fixed; inset:0; display:none; align-items:center; justify-content:center; background:rgba(0,0,0,.65); z-index:1000; }
+  .card{
+    background:linear-gradient(#2e2147,#1b1328); border:4px solid var(--rim); border-radius:16px; padding:16px; width:560px;
+    text-align:center; box-shadow:var(--shadow);
+  }
+  .card h2{margin:0 0 10px 0; font-family:"Press Start 2P"; color:var(--gold); font-size:18px}
+  .toast{
+    position:fixed; left:50%; top:18px; transform:translateX(-50%);
+    background:#1b1328; border:3px solid #4a356c; border-radius:12px; padding:8px 12px; z-index:1200;
+    animation:fadeOut 1800ms ease forwards;
+  }
+  @keyframes fadeOut{ 0%{opacity:0; transform:translate(-50%, -6px)} 10%{opacity:1; transform:translate(-50%, 0)} 100%{opacity:0; transform:translate(-50%, -8px)} }
+</style>
+</head>
+<body class="crt">
+<main id="root"></main>
+
+<!-- Global overlays -->
+<div id="modal" class="overlay" aria-hidden="true"></div>
+<div id="gameover" class="overlay" aria-hidden="true">
+  <div class="card">
+    <h2>Game Over</h2>
+    <div style="font-size:18px;margin-top:6px">You collapse as the dungeon fades to black…</div>
+    <div style="margin-top:12px"><button id="goToCreator" class="btn">Return to Character Forge</button></div>
+  </div>
+</div>
+
+<script>
+/* ===========================
+   SHARED: audio + sprites
+=========================== */
+const SFX = {
+  bleep(freq=660, dur=0.05){
+    try{
+      const ctx = new (window.AudioContext||window.webkitAudioContext)();
+      const o = ctx.createOscillator(); const g = ctx.createGain();
+      o.connect(g); g.connect(ctx.destination);
+      o.type = "square"; o.frequency.value = freq;
+      g.gain.setValueAtTime(0.08, ctx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + dur);
+      o.start(); o.stop(ctx.currentTime + dur + 0.01);
+    }catch(e){}
+  }
+};
+
+function drawPixelSprite(canvas, map, palette, scale=6){
+  const ctx = canvas.getContext('2d');
+  const size = map.length; canvas.width=size*scale; canvas.height=size*scale;
+  ctx.imageSmoothingEnabled = false;
+  for(let y=0;y<size;y++)
+    for(let x=0;x<size;x++){
+      const ch = map[y][x]; if(ch!=='.'){ ctx.fillStyle = palette[ch]||'#000'; ctx.fillRect(x*scale, y*scale, scale, scale); }
+    }
+}
+const PALETTES = {
+  paladin: {s:"#f3c9a6", h:"#5a4126", a:"#a7b2c3", g:"#f6d26b", c:"#5e6a8a", w:"#e9e5d0", b:"#6b4e10", d:"#2b2f3a"},
+  wizard : {s:"#eec6a8", h:"#dbbfff", a:"#7e7bb3", g:"#caa4ff", c:"#5c3ca3", w:"#f8f6ff", b:"#3b2c66", m:"#63d297", d:"#24173e"},
+  assassin:{s:"#d9b89e", h:"#2b2f3a", a:"#495464", g:"#9aa7b2", c:"#1f2530", w:"#e5e7eb", b:"#2c3a48", r:"#ff5868", d:"#151a22"},
+  warrior: {s:"#e8b894", h:"#7a4f28", a:"#8a6d4b", g:"#d9b37d", c:"#614c3b", w:"#e9e5d0", b:"#5a3a22", d:"#2a1d13"},
+  nerd   : {s:"#eac6ad", h:"#232b36", a:"#9db4c0", g:"#f6d26b", c:"#3da5ff", w:"#ffffff", b:"#2b3e50", n:"#6de2f8", d:"#1b2430"}
+};
+const MAPS = {
+  paladin: [
+  "..wwwwww........",".wssssssw.......",".wshsshsw.......",".wssssssw.......","..wssssw........","...cccc.........","..caaaaac.......",
+  ".caggggaac......",".caggggaac..ww..",".caaaaaaac.wggw.","..caccac...wggw.","..b.b..b....ww..","..b.b..b........","...b..b.........","....dd..........","....dd.........."
+  ],
+  wizard: [
+  "......mmmmm.....",".....mmmmm......","......mmmm......","....wsssssww....","...wshsshsw.....","...wsssssww.....",".....cccc.......","....ccccc.......",
+  "...cccccmm......","...caaaacm......","...cawawc.......","...caaaac.......","....b...b.......","....b...b.......",".....d.d........",".....d.d........"
+  ],
+  assassin: [
+  "......rrrr......",".....rccccr.....","......r..r......","...wsssssww.....","..wshsshsw......","..wsssssww......","...cccccc.......","..caaaaaac......",
+  "..caa..aac..r...","...caccac..rr...","....b..b..r.....","....b..b.r......",".....b.b........",".....b.b........",".....d..........",".....d.........."
+  ],
+  warrior: [
+  ".......d........","...wwdssdww.....","..wssshsssw.....","..wsssssssw.....","...wsssssww.....","....ccccc.......","...caaaaac......","..caggggaac.....",
+  "..caaaaaaac.....","...caccac.......","....b..b..d.....","....b..b..d.....",".....b.b........",".....b.b........","......d.........","......d........."
+  ],
+  nerd: [
+  ".....wwwwww.....","....wsh..hsw....","....wswwwwsw....","....wssn nsw....",".....wssssw.....","......cccc......",".....caaaaac....","....cawggwac....",
+  "....caaaaaac....",".....caccac.....","......b..b......","......b..b......",".....b....b.....",".....b....b.....","......d..d......","......d..d......"
+  ]
+};
+
+/* ===========================
+   SHARED: utils + storage
+=========================== */
+const root = document.getElementById('root');
+const modal = document.getElementById('modal');
+const gameover = document.getElementById('gameover');
+document.getElementById('goToCreator').onclick = ()=> goCreator(App.hero?.id);
+
+function toast(msg){
+  const t = document.createElement('div');
+  t.className = 'toast';
+  t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(()=>t.remove(), 1800);
+}
+function genId(){ return 'h_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2,5); }
+
+function xpToNext(level){ return Math.round(100 * Math.pow(1.25, level-1)); }
+function totalXPForLevel(targetLevel){ let t=0; for(let L=1; L<targetLevel; L++) t+=xpToNext(L); return t; }
+function levelFromXP(xp){ let L=1; while(xp >= totalXPForLevel(L+1)) L++; return L; }
+
+function computeMaxFromStats(stats, isHelper=false){
+  const H=stats.Health||8, A=stats.Attack||4, D=stats.Defense||4, M=stats.Magic||2;
+  const maxHP = (isHelper? (30 + H*6) : (50 + H*10));
+  const maxMP = (isHelper? 0 : (100 + M*10));
+  const atk = (isHelper ? 4 : 6) + A*2;
+  const def = 2 + D*2;
+  const mag = 6 + M*3;
+  const agi = 1 + (stats.Agility||2)*0.12;
+  return {maxHP, maxMP, atk, def, mag, agi};
+}
+
+/* --- roster + active hero --- */
+function rosterLoad(){
+  try{ return JSON.parse(localStorage.getItem('rpgRoster_v1')) || {}; }catch(e){ return {}; }
+}
+function rosterSave(r){ localStorage.setItem('rpgRoster_v1', JSON.stringify(r)); }
+function loadHeroActive(){
+  try{
+    const j = localStorage.getItem('rpgCharacter'); if(!j) return null;
+    const h = JSON.parse(j); if(!h || !h.id) return null;
+    return h;
+  }catch(e){ return null; }
+}
+function saveHeroActive(h){
+  localStorage.setItem('rpgCharacter', JSON.stringify(h));
+  // keep roster summary fresh
+  const r = rosterLoad();
+  r[h.id] = { name:h.name, class:h.class, key:h.key, level:h.level||1, xp:h.xp||0 };
+  rosterSave(r);
+}
+function invKey(hero){ return 'inventory_v1_' + hero.id; }
+function loadInventory(hero){
+  // prefer per-hero; fall back once to legacy then migrate
+  try{
+    const v = JSON.parse(localStorage.getItem(invKey(hero)));
+    if(v) return v;
+    const legacy = JSON.parse(localStorage.getItem('inventory_v1'));
+    if(legacy){ localStorage.setItem(invKey(hero), JSON.stringify(legacy)); return legacy; }
+  }catch(e){}
+  return {gold:0, items:[]};
+}
+function saveInventory(hero, inv){ localStorage.setItem(invKey(hero), JSON.stringify(inv)); }
+
+/* ===========================
+   APP STATE + NAV
+=========================== */
+const App = { mode:'creator', hero:null, inventory:null, current:{screen:null, api:null} };
+
+function mount(screenName, api){
+  // cleanup
+  if(App.current.api && typeof App.current.api.destroy==='function'){ App.current.api.destroy(); }
+  App.current = { screen:screenName, api };
+}
+function goCreator(selectHeroId=null){
+  App.mode='creator';
+  const api = CharacterCreator.mount(root, (res)=>{
+    App.hero = res.hero;
+    App.inventory = loadInventory(App.hero);
+    goMap(true); // fresh run
+  }, selectHeroId);
+  mount('creator', api);
+}
+function goMap(fresh=false){
+  App.mode='map';
+  const api = MapScreen.mount(root, App.hero, (room)=>{ // onEncounter
+    const count = 1 + Math.floor(Math.random()*3);
+    goBattle({ enemies:'slime', count, sourceRoomId: room.id, seed: Math.floor(Math.random()*1e9) });
+  }, ()=>{/* onDescend handled inside map */}, ()=>{ // onSpendPoints
+    openSpendPointsModal(App.hero, ()=>{ // onClose
+      // refresh sidebar bars after spending
+      if(App.current.api && App.current.api.refreshHeroPanel) App.current.api.refreshHeroPanel();
+    });
+  }, fresh);
+  mount('map', api);
+}
+function goBattle(config){
+  App.mode='battle';
+  const api = CombatScreen.mount(root, App.hero, App.inventory, config, (result)=>{
+    // persist inventory if changed inside combat
+    saveInventory(App.hero, App.inventory);
+    if(result.victory){
+      // gain XP and maybe level up (refill HP/MP on each level)
+      const prevLevel = App.hero.level||1;
+      App.hero.xp = (App.hero.xp||0) + (result.xp||0);
+      // Level ups
+      while(App.hero.xp >= totalXPForLevel((App.hero.level||1)+1)){
+        App.hero.level = (App.hero.level||1) + 1;
+        App.hero.unspent = (App.hero.unspent||0) + 2;
+        const max = computeMaxFromStats(App.hero.stats);
+        App.hero.hp = max.maxHP; App.hero.mp = max.maxMP;
+        toast(`Level Up! Now Level ${App.hero.level}`);
+        SFX.bleep(900);
+      }
+      // loot
+      if(result.gold){ App.inventory.gold += result.gold; }
+      (result.items||[]).forEach(it=> App.inventory.items.push(it));
+      saveInventory(App.hero, App.inventory);
+      saveHeroActive(App.hero);
+
+      // If leveled, offer spend-now modal (deferrable)
+      if((App.hero.unspent||0) > 0){
+        openSpendPointsModal(App.hero, ()=>{ goMap(false); });
+      }else{
+        goMap(false);
+      }
+    }else{
+      // defeat: save hero (levels/items kept), show Game Over, then return to creator with this hero selected
+      saveHeroActive(App.hero);
+      saveInventory(App.hero, App.inventory);
+      showGameOver(()=> goCreator(App.hero.id));
+    }
+  });
+  mount('battle', api);
+}
+function showGameOver(cb){
+  gameover.style.display='flex'; gameover.setAttribute('aria-hidden','false');
+  const btn = document.getElementById('goToCreator');
+  const handler = ()=>{ gameover.style.display='none'; gameover.setAttribute('aria-hidden','true'); btn.removeEventListener('click', handler); cb&&cb(); };
+  btn.addEventListener('click', handler);
+}
+
+/* ===========================
+   MODAL: Spend Points
+=========================== */
+function openSpendPointsModal(hero, onClose){
+  const max = computeMaxFromStats(hero.stats);
+  const overlay = modal; overlay.innerHTML = ''; overlay.style.display='flex'; overlay.setAttribute('aria-hidden','false');
+
+  const card = document.createElement('div'); card.className='card';
+  const h2 = document.createElement('h2'); h2.textContent = 'Spend Stat Points';
+  const p = document.createElement('div'); p.style.fontSize='18px'; p.textContent = `Unspent points: ${hero.unspent||0}`;
+  const statsWrap = document.createElement('div'); statsWrap.style.marginTop='8px'; statsWrap.style.display='grid'; statsWrap.style.gridTemplateColumns='repeat(5,1fr)'; statsWrap.style.gap='8px';
+
+  const STAT_KEYS = ["Health","Attack","Defense","Magic","Agility"];
+  const controls = {};
+  STAT_KEYS.forEach(k=>{
+    const panel = document.createElement('div'); panel.className='panel'; panel.style.padding='8px';
+    const lbl = document.createElement('div'); lbl.style.fontFamily='"Press Start 2P"'; lbl.style.fontSize='12px'; lbl.style.color='var(--gold)'; lbl.textContent = k;
+    const row = document.createElement('div'); row.style.display='flex'; row.style.gap='6px'; row.style.alignItems='center'; row.style.justifyContent='center';
+    const btnM = document.createElement('button'); btnM.className='btn small'; btnM.textContent='−';
+    const val = document.createElement('div'); val.style.minWidth='28px'; val.style.textAlign='center'; val.style.fontSize='18px'; val.textContent = hero.stats[k];
+    const btnP = document.createElement('button'); btnP.className='btn small'; btnP.textContent='+';
+    row.append(btnM,val,btnP);
+    panel.append(lbl,row);
+    statsWrap.append(panel);
+    controls[k] = { val, btnM, btnP };
+  });
+
+  function refresh(){
+    p.textContent = `Unspent points: ${hero.unspent||0}`;
+    STAT_KEYS.forEach(k=> controls[k].val.textContent = hero.stats[k]);
+    saveHeroActive(hero); // persist live
+  }
+  STAT_KEYS.forEach(k=>{
+    controls[k].btnP.onclick = ()=>{
+      if((hero.unspent||0)>0 && hero.stats[k]<20){ hero.stats[k]++; hero.unspent--; refresh(); }
+    };
+    controls[k].btnM.onclick = ()=>{
+      // allow lowering only if you raised during this modal? Simpler rule: don’t allow minus here.
+      SFX.bleep(300);
+    };
+  });
+
+  const btnRow = document.createElement('div'); btnRow.style.marginTop='12px';
+  const ok = document.createElement('button'); ok.className='btn'; ok.textContent='Done';
+  const later = document.createElement('button'); later.className='btn alt'; later.style.marginLeft='8px'; later.textContent='Spend Later';
+  btnRow.append(ok,later);
+
+  card.append(h2,p,statsWrap,btnRow);
+  overlay.append(card);
+
+  function close(){
+    // Recompute new maxes and clamp/extend HP/MP if needed
+    const m = computeMaxFromStats(hero.stats);
+    hero.hp = Math.min(m.maxHP, hero.hp==null?m.maxHP:hero.hp);
+    hero.mp = Math.min(m.maxMP, hero.mp==null?m.maxMP:hero.mp);
+    saveHeroActive(hero);
+    overlay.style.display='none'; overlay.setAttribute('aria-hidden','true');
+    onClose && onClose();
+  }
+  ok.onclick = ()=>{ SFX.bleep(760); close(); };
+  later.onclick = ()=>{ SFX.bleep(520); close(); };
+}
+
+/* ===========================
+   MODULE: Character Creator
+=========================== */
+const CharacterCreator = (function(){
+  const STAT_KEYS = ["Health","Attack","Defense","Magic","Agility"];
+  const TOTAL_POINTS = 20;
+
+  function mount(container, onDone, selectHeroId){
+    container.innerHTML = '';
+    const wrap = document.createElement('div');
+
+    // Header
+    const head = document.createElement('div'); head.style.display='flex'; head.style.alignItems='center'; head.style.justifyContent='space-between'; head.style.marginBottom='10px';
+    const title = document.createElement('div'); title.className='title'; title.textContent='CHARACTER FORGE';
+    const startBtn = document.createElement('button'); startBtn.className='btn'; startBtn.textContent='Begin Run ▶'; startBtn.disabled = true;
+    head.append(title,startBtn);
+
+    // Tabs
+    const tabs = document.createElement('div'); tabs.style.display='flex'; tabs.style.gap='8px'; tabs.style.margin='8px 0 12px';
+    const newTab = document.createElement('button'); newTab.className='btn alt'; newTab.textContent='New Hero';
+    const loadTab = document.createElement('button'); loadTab.className='btn alt'; loadTab.textContent='Saved Heroes';
+    tabs.append(newTab, loadTab);
+
+    // Two panels
+    const newPanel = document.createElement('div'); newPanel.className='grid3';
+    const loadPanel = document.createElement('div'); loadPanel.style.display='none';
+
+    // LEFT: sprite + carousel (new)
+    const left = document.createElement('div'); left.className='panel';
+    const frame = document.createElement('div'); frame.style.display='grid'; frame.style.placeItems='center'; frame.style.background='linear-gradient(#181024,#0d0816)'; frame.style.border='3px solid #49336f'; frame.style.borderRadius='10px'; frame.style.aspectRatio='1/1'; frame.style.marginBottom='10px';
+    const big = document.createElement('canvas'); big.width=256; big.height=256; big.style.width='96%'; big.style.height='96%'; frame.append(big);
+    const carousel = document.createElement('div'); carousel.style.display='grid'; carousel.style.gridTemplateColumns='40px 1fr 40px'; carousel.style.gap='8px'; carousel.style.alignItems='center';
+    const prev = document.createElement('button'); prev.className='btn small'; prev.textContent='◀';
+    const thumbs = document.createElement('div'); thumbs.style.display='flex'; thumbs.style.gap='8px'; thumbs.style.overflow='auto'; thumbs.style.padding='4px'; thumbs.style.background='#211632'; thumbs.style.border='2px solid #49336f'; thumbs.style.borderRadius='10px';
+    const next = document.createElement('button'); next.className='btn small'; next.textContent='▶';
+    carousel.append(prev, thumbs, next);
+    left.append(frame, carousel);
+
+    // RIGHT: info + stats
+    const right = document.createElement('div'); right.style.display='grid'; right.style.gridTemplateRows='auto auto 1fr auto'; right.style.gap='10px';
+    const info = document.createElement('div'); info.className='panel';
+    const nameEl = document.createElement('h2'); nameEl.style.margin='0 0 6px'; nameEl.style.fontFamily='"Press Start 2P"'; nameEl.style.fontSize='18px'; nameEl.style.color='var(--gold)';
+    const classEl = document.createElement('div'); classEl.style.color='var(--emerald)'; classEl.style.fontSize='18px';
+    const flavorEl = document.createElement('div'); flavorEl.style.fontSize='18px';
+    const backEl = document.createElement('div'); backEl.style.fontSize='16px'; backEl.style.opacity='.9'; backEl.style.marginTop='6px';
+    info.append(nameEl,classEl,flavorEl,backEl);
+
+    const meter = document.createElement('div'); meter.className='panel'; meter.style.display='flex'; meter.style.alignItems='center'; meter.style.gap='10px';
+    const remain = document.createElement('div'); remain.style.fontFamily='"Press Start 2P"'; remain.style.color='var(--gold)'; remain.style.fontSize='12px';
+    const bar = document.createElement('div'); bar.style.flex='1'; bar.style.height='14px'; bar.style.background='#140d21'; bar.style.border='2px solid #49336f'; bar.style.borderRadius='10px'; bar.style.overflow='hidden';
+    const fill = document.createElement('div'); fill.style.height='100%'; fill.style.background='linear-gradient(90deg, var(--gold), var(--emerald))'; fill.style.width='0%';
+    bar.append(fill); meter.append(remain, bar);
+
+    const statsPanel = document.createElement('div'); statsPanel.className='panel'; statsPanel.style.display='grid'; statsPanel.style.gridTemplateColumns='repeat(5,1fr)'; statsPanel.style.gap='10px';
+
+    const actions = document.createElement('div'); actions.style.display='flex'; actions.style.gap='8px'; actions.style.flexWrap='wrap'; actions.style.justifyContent='flex-end';
+    const randBtn = document.createElement('button'); randBtn.className='btn alt'; randBtn.textContent='Randomise';
+    const resetBtn = document.createElement('button'); resetBtn.className='btn alt'; resetBtn.textContent='Reset';
+    const saveBtn = document.createElement('button'); saveBtn.className='btn warn'; saveBtn.textContent='Save Hero';
+    actions.append(randBtn, resetBtn, saveBtn);
+
+    right.append(info, meter, statsPanel, actions);
+    newPanel.append(left, right);
+
+    // LOAD panel (roster)
+    const rosterWrap = document.createElement('div'); rosterWrap.className='panel';
+    const rosterList = document.createElement('div'); rosterWrap.append(rosterList);
+    loadPanel.append(rosterWrap);
+
+    wrap.append(head, tabs, newPanel, loadPanel);
+    container.append(wrap);
+
+    /* state */
+    const CLASSES = [
+      {
+        key:'paladin',
+        name:'Sir Aurek the Stalwart',
+        clazz:'Human Paladin',
+        flavor:'Shining armor, dim sense of irony. Smiles at danger (and small dogs).',
+        backstory:'Knighted at Dawnspire after reciting the Oath of Radiance from memory—twice.',
+        base:{ Health:4, Attack:2, Defense:3, Magic:0, Agility:1 }
+      },
+      {
+        key:'wizard',
+        name:'Lyriel of the Sidereal Fold',
+        clazz:'Elf Wizard',
+        flavor:'Speaks twelve arcane dialects and one normal one (begrudgingly).',
+        backstory:'Exiled from the Mooncolleges for “unorthodox spell-storage.”',
+        base:{ Health:1, Attack:0, Defense:1, Magic:7, Agility:1 }
+      },
+      {
+        key:'assassin',
+        name:'Shade of Halftide',
+        clazz:'Half-Elf Assassin',
+        flavor:'Moves like a whisper, bills like a consultant.',
+        backstory:'Raised by gulls on the roofs of Halftide.',
+        base:{ Health:2, Attack:4, Defense:1, Magic:0, Agility:3 }
+      },
+      {
+        key:'warrior',
+        name:'Bromm Ironkettle',
+        clazz:'Dwarf Warrior',
+        flavor:'If it can’t be solved with an axe, try two axes.',
+        backstory:'Champion of the Caskring Pits.',
+        base:{ Health:5, Attack:3, Defense:2, Magic:0, Agility:0 }
+      },
+      {
+        key:'nerd',
+        name:'Edwin from Accounts',
+        clazz:'Human Nerd',
+        flavor:'Min-maxed life choices. Speaks fluent patch notes.',
+        backstory:'Summoned by an ancient keyboard.',
+        base:{ Health:2, Attack:1, Defense:2, Magic:3, Agility:2 }
+      }
+    ];
+
+    const state = { index:0, working:new Map(), activeHero:null };
+
+    function cloneBase(base){ return Object.fromEntries(Object.entries(base).map(([k,v])=>[k, v])); }
+    function pointsUsed(stats){ return STAT_KEYS.reduce((a,k)=>a+stats[k],0); }
+    function pointsLeft(stats){ return TOTAL_POINTS - pointsUsed(stats); }
+    function getWorking(key){
+      if(!state.working.has(key)) state.working.set(key, cloneBase(CLASSES.find(c=>c.key===key).base));
+      return state.working.get(key);
+    }
+
+    function buildThumbs(){
+      thumbs.innerHTML='';
+      CLASSES.forEach((c,i)=>{
+        const wrap = document.createElement('button'); wrap.className='btn small'; wrap.textContent = c.clazz.split(' ')[1];
+        wrap.style.minWidth='64px';
+        wrap.onclick = ()=> setIndex(i);
+        thumbs.append(wrap);
+      });
+    }
+    function setIndex(i){ state.index=(i+CLASSES.length)%CLASSES.length; renderCurrent(); SFX.bleep(280); }
+    prev.onclick = ()=> setIndex(state.index-1);
+    next.onclick = ()=> setIndex(state.index+1);
+
+    function renderCurrent(){
+      const c = CLASSES[state.index];
+      drawPixelSprite(big, MAPS[c.key], PALETTES[c.key], 16);
+      nameEl.textContent = c.name; classEl.textContent=c.clazz; flavorEl.textContent=c.flavor; backEl.textContent=c.backstory;
+      statsPanel.innerHTML='';
+      const stats = getWorking(c.key);
+      const leftPts = pointsLeft(stats);
+      remain.textContent = `Points left: ${leftPts} / ${TOTAL_POINTS}`;
+      fill.style.width = (pointsUsed(stats)/TOTAL_POINTS*100)+'%';
+
+      STAT_KEYS.forEach(k=>{
+        const p = document.createElement('div'); p.className='panel'; p.style.display='grid'; p.style.gap='6px'; p.style.justifyItems='center';
+        const lbl = document.createElement('div'); lbl.style.fontFamily='"Press Start 2P"'; lbl.style.fontSize='12px'; lbl.style.color='var(--gold)'; lbl.textContent=k;
+        const row = document.createElement('div'); row.style.display='flex'; row.style.gap='6px'; row.style.alignItems='center'; row.style.justifyContent='center';
+        const m = document.createElement('button'); m.className='btn small'; m.textContent='−';
+        const val = document.createElement('div'); val.style.minWidth='28px'; val.style.textAlign='center'; val.style.fontSize='18px'; val.textContent=stats[k];
+        const pbtn = document.createElement('button'); pbtn.className='btn small'; pbtn.textContent='+';
+        const min = c.base[k];
+        m.onclick = ()=>{ if(stats[k] > min){ stats[k]--; renderCurrent(); SFX.bleep(360);} };
+        pbtn.onclick = ()=>{ if(pointsLeft(stats)>0 && stats[k]<20){ stats[k]++; renderCurrent(); SFX.bleep(720);} };
+        row.append(m,val,pbtn); p.append(lbl,row); statsPanel.append(p);
+      });
+      startBtn.disabled = pointsLeft(stats)!==0;
+    }
+
+    randBtn.onclick = ()=>{
+      const c = CLASSES[state.index]; const s = getWorking(c.key);
+      STAT_KEYS.forEach(k=> s[k]=c.base[k]); let left=pointsLeft(s);
+      while(left>0){ const k=STAT_KEYS[Math.floor(Math.random()*STAT_KEYS.length)]; if(s[k]<20){ s[k]++; left--; } }
+      renderCurrent(); SFX.bleep(820);
+    };
+    resetBtn.onclick = ()=>{ const c = CLASSES[state.index]; state.working.set(c.key, cloneBase(c.base)); renderCurrent(); SFX.bleep(520); };
+
+    saveBtn.onclick = ()=>{
+      const c = CLASSES[state.index]; const stats = getWorking(c.key); if(pointsLeft(stats)!==0) return;
+      // new hero
+      const id = genId();
+      const hero = {
+        id, key:c.key, name:c.name, class:c.clazz,
+        stats:{...stats}, xp:0, level:1, unspent:0,
+        hp: computeMaxFromStats(stats).maxHP, mp: computeMaxFromStats(stats).maxMP,
+        meta:{ createdAt:new Date().toISOString(), runs:0, bestDepth:0 }
+      };
+      saveHeroActive(hero);
+      localStorage.setItem('rpgCharacter', JSON.stringify(hero));
+      // reset per-hero inventory
+      saveInventory(hero, {gold:0, items:[]});
+      toast('Hero saved'); SFX.bleep(700);
+      // switch to load tab and select this hero
+      renderRoster(id);
+      showLoad();
+    };
+
+    startBtn.onclick = ()=>{
+      // Start with selected class stats as a **new** hero OR resume selected activeHero
+      if(state.activeHero){
+        // resume existing selection: ensure hp/mp at max for run start
+        const h = state.activeHero;
+        const m = computeMaxFromStats(h.stats);
+        h.hp = m.maxHP; h.mp = m.maxMP;
+        saveHeroActive(h);
+        onDone({hero:h});
+      }else{
+        const c = CLASSES[state.index]; const stats = getWorking(c.key); if(pointsLeft(stats)!==0) return;
+        const id = genId();
+        const hero = {
+          id, key:c.key, name:c.name, class:c.clazz,
+          stats:{...stats}, xp:0, level:1, unspent:0,
+          hp: computeMaxFromStats(stats).maxHP, mp: computeMaxFromStats(stats).maxMP,
+          meta:{ createdAt:new Date().toISOString(), runs:0, bestDepth:0 }
+        };
+        saveHeroActive(hero);
+        saveInventory(hero, {gold:0, items:[]});
+        onDone({hero});
+      }
+    };
+
+    /* roster (load) */
+    function heroCard(id, hsum){
+      const card = document.createElement('div'); card.className='panel'; card.style.display='grid'; card.style.gridTemplateColumns='96px 1fr auto'; card.style.gap='10px'; card.style.alignItems='center';
+      const cvs = document.createElement('canvas'); cvs.width=96; cvs.height=96; cvs.style.width='96px'; cvs.style.height='96px';
+      drawPixelSprite(cvs, MAPS[hsum.key]||MAPS.warrior, PALETTES[hsum.key]||PALETTES.warrior, 6);
+      const info = document.createElement('div');
+      const n = document.createElement('div'); n.className='title'; n.style.fontSize='14px'; n.textContent = hsum.name;
+      const c = document.createElement('div'); c.style.color='var(--emerald)'; c.style.fontSize='18px'; c.textContent = hsum.class||'';
+      const s = document.createElement('div'); s.style.fontSize='16px'; s.innerHTML = `Level <b>${hsum.level||1}</b> • XP ${hsum.xp||0}`;
+      info.append(n,c,s);
+      const pick = document.createElement('button'); pick.className='btn'; pick.textContent='Select';
+      pick.onclick = ()=>{
+        // load full hero record into active
+        try{
+          const all = JSON.parse(localStorage.getItem('rpgCharacter')); // maybe already active
+          let hero = null;
+          if(all && all.id===id) hero = all;
+          else{
+            // reconstruct: we store the full hero under 'rpgCharacter' when it's active only.
+            // So we need to keep a per-hero blob; to keep it simple, store full hero under 'rpgHero_'+id.
+            const raw = localStorage.getItem('rpgHero_'+id);
+            if(raw){ hero = JSON.parse(raw); }
+            else{
+              // fallback: make a minimal hero from roster and infer stats from class base (not ideal but OK for first run)
+              hero = { id, name:hsum.name, class:hsum.class, key:hsum.key, level:hsum.level||1, xp:hsum.xp||0,
+                       stats:{Health:8,Attack:4,Defense:4,Magic:2,Agility:2}, unspent:0 };
+              const m = computeMaxFromStats(hero.stats); hero.hp=m.maxHP; hero.mp=m.maxMP;
+            }
+          }
+          state.activeHero = hero;
+          saveHeroActive(hero);
+          startBtn.disabled = false;
+          toast(`${hero.name} selected`);
+        }catch(e){}
+      };
+      const del = document.createElement('button'); del.className='btn warn'; del.textContent='Delete';
+      del.onclick = ()=>{
+        const r = rosterLoad(); delete r[id]; rosterSave(r);
+        localStorage.removeItem('rpgHero_'+id);
+        localStorage.removeItem(invKey({id}));
+        renderRoster();
+      };
+      card.append(cvs, info, (function(){ const box=document.createElement('div'); box.style.display='grid'; box.style.gap='8px'; box.append(pick, del); return box; })());
+      return card;
+    }
+    function renderRoster(selectId){
+      const r = rosterLoad(); rosterList.innerHTML = '';
+      const keys = Object.keys(r);
+      if(!keys.length){ rosterList.textContent = 'No saved heroes yet.'; startBtn.disabled=true; state.activeHero=null; return; }
+      keys.forEach(id=> rosterList.append(heroCard(id, r[id])));
+      if(selectId && r[selectId]){
+        // auto-select hero (load it)
+        const raw = localStorage.getItem('rpgHero_'+selectId);
+        if(raw){ state.activeHero = JSON.parse(raw); } else { state.activeHero = {id:selectId, ...r[selectId], stats:{Health:8,Attack:4,Defense:4,Magic:2,Agility:2}, unspent:0}; }
+        saveHeroActive(state.activeHero);
+        startBtn.disabled=false;
+      }
+    }
+
+    function showNew(){ newPanel.style.display='grid'; loadPanel.style.display='none'; newTab.classList.add('disabled'); loadTab.classList.remove('disabled'); startBtn.disabled = true; state.activeHero=null; }
+    function showLoad(){ newPanel.style.display='none'; loadPanel.style.display='block'; newTab.classList.remove('disabled'); loadTab.classList.add('disabled'); renderRoster(selectHeroId); }
+
+    newTab.onclick = showNew; loadTab.onclick = showLoad;
+
+    // boot
+    buildThumbs(); setIndex(0); renderCurrent();
+    // if we came from game over with a hero id, open load
+    if(selectHeroId){ showLoad(); } else { showNew(); }
+
+    return {
+      destroy(){ /* nothing persistent */ }
+    };
+  }
+
+  return { mount };
+})();
+
+/* ===========================
+   MODULE: Map Screen
+=========================== */
+const MapScreen = (function(){
+  function mount(container, hero, onEncounter, onDescend, onSpendPoints, fresh){
+    container.innerHTML='';
+    const screen = document.createElement('div'); screen.className='grid3';
+
+    // Sidebar
+    const side = document.createElement('aside'); side.className='panel'; side.style.display='grid'; side.style.gridTemplateRows='auto auto 1fr auto'; side.style.gap='10px';
+    const heroCard = document.createElement('div'); heroCard.style.display='grid'; heroCard.style.gridTemplateColumns='96px 1fr'; heroCard.style.gap='10px'; heroCard.style.alignItems='center';
+    const heroCvs = document.createElement('canvas'); heroCvs.width=96; heroCvs.height=96; heroCvs.style.width='96px'; heroCvs.style.height='96px';
+    drawPixelSprite(heroCvs, MAPS[hero.key]||MAPS.warrior, PALETTES[hero.key]||PALETTES.warrior, 6);
+    const hmeta = document.createElement('div');
+    const hname = document.createElement('div'); hname.className='title'; hname.style.fontSize='14px'; hname.textContent = hero.name;
+    const hclass = document.createElement('div'); hclass.style.color='var(--emerald)'; hclass.style.fontSize='18px'; hclass.textContent = hero.class||'';
+    const bars = document.createElement('div'); bars.style.display='grid'; bars.style.gridTemplateColumns='1fr 1fr'; bars.style.gap='6px'; bars.style.marginTop='6px';
+    function makeRow(lbl, id){ const w=document.createElement('div'); w.style.display='flex'; w.style.alignItems='center'; w.style.gap='6px'; const L=document.createElement('span'); L.style.fontFamily='"Press Start 2P"'; L.style.fontSize='10px'; L.style.color='var(--gold)'; L.textContent=lbl; const m=document.createElement('div'); m.style.flex='1'; m.style.height='10px'; m.style.border='2px solid #4a356c'; m.style.background='#150f23'; m.style.borderRadius='8px'; m.style.overflow='hidden'; const f=document.createElement('div'); f.style.height='100%'; f.style.background='linear-gradient(90deg,var(--gold),var(--emerald))'; f.id=id; m.append(f); w.append(L,m); return w; }
+    const hpFill = makeRow('HP','hpFill'); const mpFill = makeRow('MP','mpFill'); const atkFill = makeRow('ATK','atkFill'); const defFill = makeRow('DEF','defFill'); const magFill = makeRow('MAG','magFill'); const agiFill = makeRow('AGI','agiFill');
+    bars.append(hpFill,mpFill,atkFill,defFill,magFill,agiFill);
+    hmeta.append(hname,hclass,bars);
+    heroCard.append(heroCvs, hmeta);
+
+    const infoRow = document.createElement('div'); infoRow.style.fontSize='18px'; infoRow.innerHTML = `Level: <span id="levelNum">${1}</span> • <span class="gold">Gold:</span> <span id="goldAmt">0</span>`;
+    const buttons = document.createElement('div'); buttons.style.display='grid'; buttons.style.gap='8px';
+    const invBtn = document.createElement('button'); invBtn.className='btn'; invBtn.textContent='Inventory';
+    const spendBtn = document.createElement('button'); spendBtn.className='btn'; spendBtn.textContent='Spend Points';
+    const hint = document.createElement('div'); hint.style.fontSize='18px'; hint.id='hint'; hint.textContent='Hover a visible room to preview the path.';
+    buttons.append(invBtn, spendBtn);
+
+    side.append(heroCard, infoRow, buttons, hint);
+
+    // Map panel
+    const mapWrap = document.createElement('section'); mapWrap.className='panel'; mapWrap.style.display='grid'; mapWrap.style.gridTemplateRows='auto 1fr auto'; mapWrap.style.gap='8px';
+    const mapHead = document.createElement('div'); mapHead.style.display='flex'; mapHead.style.alignItems='center'; mapHead.style.justifyContent='space-between';
+    const mapTitle = document.createElement('div'); mapTitle.textContent='Dungeon Level '; const lvlLabel = document.createElement('span'); lvlLabel.id='lvlLabel'; lvlLabel.textContent='1'; mapTitle.append(lvlLabel);
+    const coord = document.createElement('div'); coord.id='coordLabel'; coord.textContent='Room —';
+    mapHead.append(mapTitle, coord);
+    const canvasWrap = document.createElement('div'); canvasWrap.style.border='3px solid #4a356c'; canvasWrap.style.borderRadius='12px'; canvasWrap.style.background='#110a1b'; canvasWrap.style.display='grid'; canvasWrap.style.placeItems='center'; canvasWrap.style.overflow='hidden'; canvasWrap.style.maxHeight='72vh';
+    const canvas = document.createElement('canvas'); canvas.id='map'; canvasWrap.append(canvas);
+    const mapFoot = document.createElement('div'); mapFoot.style.opacity='.8'; mapFoot.textContent='Doors connect rooms. Secret doors need Search (E).';
+    mapWrap.append(mapHead, canvasWrap, mapFoot);
+
+    screen.append(side, mapWrap);
+    container.append(screen);
+
+    // inventory for sidebar
+    const inv = loadInventory(hero);
+    document.getElementById('goldAmt').textContent = inv.gold;
+
+    // stats bars
+    function refreshHeroPanel(){
+      const m = computeMaxFromStats(hero.stats);
+      const pct = (v, max)=> Math.min(100, Math.round(100*v/max));
+      document.getElementById('hpFill').querySelector('div')?.remove(); // cleanup if nested
+      document.getElementById('mpFill').querySelector('div')?.remove();
+      document.getElementById('hpFill').style.width = pct(hero.hp||m.maxHP, m.maxHP)+'%';
+      document.getElementById('mpFill').style.width = pct(hero.mp||m.maxMP, m.maxMP)+'%';
+      document.getElementById('atkFill').style.width = pct(hero.stats.Attack||4, 20)+'%';
+      document.getElementById('defFill').style.width = pct(hero.stats.Defense||4, 20)+'%';
+      document.getElementById('magFill').style.width = pct(hero.stats.Magic||2, 20)+'%';
+      document.getElementById('agiFill').style.width = pct(hero.stats.Agility||2, 20)+'%';
+    }
+    refreshHeroPanel();
+
+    invBtn.onclick = ()=> alert(JSON.stringify(loadInventory(hero), null, 2));
+    spendBtn.onclick = ()=> onSpendPoints && onSpendPoints();
+
+    /* DUNGEON IMPLEMENTATION (trimmed from your file, with new-room MP +10 and encounter hook) */
+    const ctx = canvas.getContext('2d'); ctx.imageSmoothingEnabled=false;
+    const WORLD = {x:0,y:0,w:1600,h:1000};
+    const MIN_LEAF_W=260, MIN_LEAF_H=200, MAX_DEPTH=4;
+    let animReq = 0;
+
+    const S = {
+      level:1, rooms:[], adj:new Map(),
+      curId:null, startId:null, exitId:null, keyId:null,
+      visited:new Set(), entered:new Set(), hasKey:false,
+      player:{x:0,y:0}, anim:null, view:{tx:0,ty:0,s:1},
+      hoverId:null, hoverPath:null, hoverReachable:false
+    };
+
+    function roomById(id){ return S.rooms.find(r=>r.id===id); }
+    const randRange = (a,b)=>{ a=Math.floor(a); b=Math.floor(b); return a + Math.floor(Math.random()*(Math.max(1,b-a))); };
+
+    function splitLeaf(L, depth, out){
+      if(depth>=MAX_DEPTH || (L.w<=MIN_LEAF_W*2 && L.h<=MIN_LEAF_H*2)){ out.push(L); return; }
+      const canV = L.w >= MIN_LEAF_W*2, canH = L.h >= MIN_LEAF_H*2;
+      const doV = canV && canH ? Math.random()<0.5 : canV;
+      if(doV){
+        const cut = randRange(L.x+MIN_LEAF_W, L.x+L.w-MIN_LEAF_W);
+        splitLeaf({x:L.x, y:L.y, w:cut-L.x, h:L.h}, depth+1, out);
+        splitLeaf({x:cut, y:L.y, w:L.x+L.w-cut, h:L.h}, depth+1, out);
+      }else{
+        const cut = randRange(L.y+MIN_LEAF_H, L.y+L.h-MIN_LEAF_H);
+        splitLeaf({x:L.x, y:L.y, w:L.w, h:cut-L.y}, depth+1, out);
+        splitLeaf({x:L.x, y:cut, w:L.w, h:L.y+L.h-cut}, depth+1, out);
+      }
+    }
+    function makeRooms(leaves){
+      const rooms=[];
+      leaves.forEach((L,i)=>{
+        const margin=24; const maxW=Math.max(120, L.w-40), maxH=Math.max(100, L.h-40);
+        const w = randRange(Math.max(120, maxW*0.45), maxW);
+        const h = randRange(Math.max(100, maxH*0.45), maxH);
+        const x = randRange(L.x+margin, L.x+L.w-w-margin);
+        const y = randRange(L.y+margin, L.y+L.h-h-margin);
+        const r = {id:i, x, y, w, h}; r.cx=Math.floor(r.x+r.w/2); r.cy=Math.floor(r.y+r.h/2);
+        rooms.push(r);
+      });
+      return rooms;
+    }
+    function connectRooms(rooms){
+      const N=rooms.length; const inTree=new Set([0]); const edges=[];
+      while(inTree.size<N){
+        let best=null, bestD=Infinity;
+        for(const i of inTree){
+          for(let j=0;j<N;j++){
+            if(inTree.has(j)) continue;
+            const d = Math.abs(rooms[i].cx-rooms[j].cx)+Math.abs(rooms[i].cy-rooms[j].cy);
+            if(d<bestD){ bestD=d; best=[i,j]; }
+          }
+        }
+        inTree.add(best[1]); edges.push(best);
+      }
+      for(let k=0;k<Math.floor(N*0.25);k++){
+        const a=randRange(0,N), b=randRange(0,N);
+        if(a!==b) edges.push([a,b]);
+      }
+      const adj = new Map(rooms.map(r=>[r.id, []]));
+      edges.forEach((e, idx)=>{
+        const [i,j]=e; const isTree = idx < (rooms.length-1);
+        const secret = !isTree && Math.random()<0.55;
+        const e1 = {to:j, type: secret?'secret':'door', revealed: !secret};
+        const e2 = {to:i, type: secret?'secret':'door', revealed: !secret};
+        adj.get(i).push(e1); adj.get(j).push(e2);
+      });
+      S.adj = adj;
+    }
+    function distancesFrom(startId, includeSecrets=false){
+      const q=[startId]; const dist=new Map([[startId,0]]);
+      while(q.length){
+        const u=q.shift();
+        for(const e of S.adj.get(u)||[]){
+          if(e.type==='secret' && !e.revealed && !includeSecrets) continue;
+          const v=e.to; if(dist.has(v)) continue;
+          dist.set(v, dist.get(u)+1); q.push(v);
+        }
+      }
+      return dist;
+    }
+    function specials(){
+      S.startId = S.rooms[Math.floor(Math.random()*S.rooms.length)].id;
+      const d = distancesFrom(S.startId,false);
+      let far=-1, farId=S.startId; for(const [rid,dd] of d.entries()){ if(dd>far){ far=dd; farId=rid; } }
+      S.exitId = farId;
+      const keyCands = S.rooms.filter(r=> r.id!==S.startId && r.id!==S.exitId && (d.get(r.id)||0) >= 4);
+      const keyRoom = keyCands.length ? keyCands[Math.floor(Math.random()*keyCands.length)]
+                                      : S.rooms.find(r=>r.id!==S.startId && r.id!==S.exitId) || S.rooms[0];
+      S.keyId = keyRoom.id;
+
+      S.rooms.forEach(r=>{ r.up=false; r.down=false; r.key=false; r.monster=false; r.chest=false; });
+      roomById(S.startId).up = true; roomById(S.exitId).down = true; roomById(S.keyId).key = true;
+
+      S.curId = S.startId; S.player={x:roomById(S.curId).cx, y:roomById(S.curId).cy};
+      S.visited = new Set([S.curId]); S.entered = new Set(); S.hasKey=false;
+    }
+    function populate(){
+      S.rooms.forEach(r=>{
+        if(r.id===S.startId || r.id===S.exitId || r.id===S.keyId) return;
+        r.monster = Math.random()<0.30;
+        r.chest   = !r.monster && Math.random()<0.18;
+      });
+    }
+    function computeView(){
+      const rect = canvas.getBoundingClientRect();
+      const pad = 40; const worldW = WORLD.w + pad*2, worldH = WORLD.h + pad*2;
+      const s = Math.min(rect.width/worldW, rect.height/worldH);
+      const tx = (rect.width - s*(WORLD.w))/2 + s*WORLD.x;
+      const ty = (rect.height - s*(WORLD.h))/2 + s*WORLD.y;
+      S.view = {tx,ty,s};
+    }
+    function worldToScreen(x,y){ const {tx,ty,s}=S.view; return {x: tx + x*s, y: ty + y*s}; }
+    function screenToWorld(px,py){ const {tx,ty,s}=S.view; return {x:(px-tx)/s, y:(py-ty)/s}; }
+    function visibleSet(){
+      const vis = new Set(S.visited); vis.add(S.curId);
+      for(const e of S.adj.get(S.curId)||[]){
+        if(e.type==='secret' && !e.revealed) continue;
+        vis.add(e.to);
+      }
+      return vis;
+    }
+    function path(fromId,toId){
+      const q=[fromId]; const prev=new Map([[fromId,null]]);
+      while(q.length){
+        const u=q.shift(); if(u===toId) break;
+        for(const e of S.adj.get(u)||[]){
+          if(e.type==='secret' && !e.revealed) continue;
+          const v=e.to; if(prev.has(v)) continue;
+          prev.set(v,u); q.push(v);
+        }
+      }
+      if(!prev.has(toId)) return null;
+      const res=[]; let cur=toId; while(cur!=null){ res.push(cur); cur=prev.get(cur); }
+      return res.reverse();
+    }
+
+    function beginMove(ids){
+      const pts = ids.map(id=>({x:roomById(id).cx, y:roomById(id).cy}));
+      S.anim = {ids, pts, seg:0, t:0, dur:0.2}; stepSeg(); animReq = requestAnimationFrame(tick);
+      SFX.bleep(520);
+    }
+    function stepSeg(){
+      const a=S.anim.pts[S.anim.seg], b=S.anim.pts[S.anim.seg+1];
+      const dist = Math.hypot(b.x-a.x, b.y-a.y); const speed = 380;
+      S.anim.t=0; S.anim.dur = Math.max(0.18, dist/speed);
+      S.anim.from=a; S.anim.to=b;
+    }
+    let lastTS=null;
+    function tick(ts){
+      if(!S.anim){ lastTS=null; return; }
+      if(lastTS==null) lastTS=ts;
+      const dt=Math.min(0.05,(ts-lastTS)/1000); lastTS=ts;
+      S.anim.t += dt/S.anim.dur;
+      const t=Math.min(1,S.anim.t);
+      const u = t<0.5 ? 2*t*t : -1 + (4 - 2*t)*t;
+      S.player.x = S.anim.from.x + (S.anim.to.x - S.anim.from.x)*u;
+      S.player.y = S.anim.from.y + (S.anim.to.y - S.anim.from.y)*u;
+      draw();
+      if(t>=1){
+        S.curId = S.anim.ids[S.anim.seg+1];
+        S.visited.add(S.curId);
+        onEnterRoom(S.curId); // note: *after* visited add
+        S.anim.seg++;
+        if(S.anim.seg >= S.anim.ids.length-1){ S.anim=null; lastTS=null; draw(); return; }
+        stepSeg();
+      }
+      animReq = requestAnimationFrame(tick);
+    }
+
+    function onEnterRoom(id){
+      const r = roomById(id);
+
+      // NEW: per-new-room +10 MP (only once per unique room)
+      if(!S.entered.has(id)){
+        S.entered.add(id);
+        const m = computeMaxFromStats(hero.stats);
+        hero.mp = Math.min(m.maxMP, (hero.mp||0) + 10);
+        saveHeroActive(hero);
+        refreshHeroPanel();
+        toast('+10 MP');
+        SFX.bleep(760);
+      }
+
+      // Secrets auto-reveal chance
+      const secrets = (S.adj.get(id)||[]).filter(e=>e.type==='secret' && !e.revealed);
+      if(secrets.length && Math.random()<0.35){
+        const e = secrets[Math.floor(Math.random()*secrets.length)];
+        e.revealed = true;
+        const back = (S.adj.get(e.to)||[]).find(x=>x.to===id && x.type==='secret');
+        if(back) back.revealed = true;
+        hint.textContent = "A faint draft betrays a hidden door…";
+        SFX.bleep(760);
+      }
+      if(r.key && !S.hasKey){
+        S.hasKey = true; r.key=false;
+        hint.textContent = "You found the key. Seek the stairs down."; SFX.bleep(900);
+      }
+      if(r.monster){
+        r.monster=false;
+        hint.textContent = "A monster lurks…"; SFX.bleep(680);
+        onEncounter && onEncounter(r);
+      }
+      if(r.chest){
+        r.chest=false;
+        const gold = randRange(8,45);
+        const invNow = loadInventory(hero); invNow.gold += gold; saveInventory(hero, invNow);
+        document.getElementById('goldAmt').textContent = invNow.gold;
+        SFX.bleep(840); alert(`Treasure! +${gold} gold`);
+      }
+      if(r.down){
+        if(S.hasKey){
+          hint.textContent = "You descend to the next level…"; SFX.bleep(820);
+          setTimeout(()=>generate(true), 350);
+        }else{
+          hint.textContent = "A heavy gate bars the stairs. You need the key."; SFX.bleep(300);
+        }
+      }
+    }
+
+    function doSearch(){
+      const cur = S.curId;
+      const secrets = (S.adj.get(cur)||[]).filter(e=>e.type==='secret' && !e.revealed);
+      if(!secrets.length){ hint.textContent="You search… nothing unusual."; SFX.bleep(400); draw(); return; }
+      secrets.forEach(e=>{
+        e.revealed=true;
+        const back = (S.adj.get(e.to)||[]).find(x=>x.to===cur && x.type==='secret'); if(back) back.revealed=true;
+      });
+      hint.textContent="Secret seams reveal hidden paths."; SFX.bleep(760); draw();
+    }
+
+    function draw(){
+      const dpr = window.devicePixelRatio||1;
+      const rect = canvas.getBoundingClientRect();
+      if(canvas.width !== Math.floor(rect.width*dpr) || canvas.height !== Math.floor(rect.height*dpr)){
+        canvas.width = Math.floor(rect.width*dpr); canvas.height=Math.floor(rect.height*dpr);
+        ctx.setTransform(dpr,0,0,dpr,0,0); computeView();
+      }
+
+      const w=rect.width, h=rect.height;
+      ctx.clearRect(0,0,w,h);
+      ctx.fillStyle = "#0f0a18"; ctx.fillRect(0,0,w,h);
+      const vg = ctx.createRadialGradient(w/2,h/2, Math.min(w,h)*0.2, w/2,h/2, Math.max(w,h)*0.7);
+      vg.addColorStop(0,"rgba(246,210,107,0.06)"); vg.addColorStop(1,"rgba(0,0,0,0.65)");
+      ctx.fillStyle = vg; ctx.fillRect(0,0,w,h);
+
+      const vis = visibleSet();
+
+      ctx.lineWidth=4; ctx.strokeStyle="#4a356c";
+      S.rooms.forEach(r=>{
+        if(!vis.has(r.id)) return;
+        const a = worldToScreen(r.cx, r.cy);
+        (S.adj.get(r.id)||[]).forEach(e=>{
+          if(e.type==='secret' && !e.revealed) return;
+          if(!vis.has(e.to)) return;
+          const b = worldToScreen(roomById(e.to).cx, roomById(e.to).cy);
+          ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke();
+        });
+      });
+
+      if(S.hoverPath){
+        const pts = S.hoverPath.map(id=>worldToScreen(roomById(id).cx, roomById(id).cy));
+        ctx.save(); ctx.lineWidth=5; ctx.setLineDash([10,8]); ctx.strokeStyle = S.hoverReachable ? "rgba(99,210,151,0.9)" : "rgba(255,88,104,0.9)";
+        ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y); for(let i=1;i<pts.length;i++) ctx.lineTo(pts[i].x, pts[i].y); ctx.stroke(); ctx.setLineDash([]);
+        ctx.fillStyle = S.hoverReachable ? "rgba(99,210,151,0.9)" : "rgba(255,88,104,0.9)"; pts.forEach(p=>{ ctx.beginPath(); ctx.arc(p.x,p.y,5,0,Math.PI*2); ctx.fill(); });
+        ctx.restore();
+      }
+
+      S.rooms.forEach(r=>{
+        const RS = worldToScreen(r.x, r.y); const RE = worldToScreen(r.x+r.w, r.y+r.h);
+        const rx=RS.x, ry=RS.y, rw=RE.x-RS.x, rh=RE.y-RS.y;
+        const isHover = (S.hoverId===r.id && (S.hoverPath || S.visited.has(r.id)));
+        if(vis.has(r.id)){
+          ctx.fillStyle="#231b34"; ctx.fillRect(rx,ry,rw,rh);
+          if(isHover){ ctx.save(); ctx.shadowColor = S.hoverReachable ? "#63d297" : "#ff5868"; ctx.shadowBlur=18; ctx.fillStyle="rgba(255,255,255,0.06)"; ctx.fillRect(rx,ry,rw,rh); ctx.restore(); }
+          ctx.strokeStyle="#6b4e10"; ctx.lineWidth=6; ctx.strokeRect(rx,ry,rw,rh);
+
+          for(const e of S.adj.get(r.id)||[]){
+            const n = roomById(e.to); if(!n) continue;
+            const cx = r.cx, cy=r.cy, nx=n.cx, ny=n.cy;
+            let px,py;
+            if(Math.abs(nx-(r.x+r.w/2)) > Math.abs(ny-(r.y+r.h/2))){ px = (nx>cx)? r.x+r.w : r.x; py = r.y+r.h/2; }
+            else{ px = r.x+r.w/2; py = (ny>cy)? r.y+r.h : r.y; }
+            const p = worldToScreen(px,py);
+            if(e.type==='secret' && !e.revealed){ if(S.visited.has(r.id)){ ctx.fillStyle="rgba(99,210,151,0.08)"; ctx.fillRect(p.x-6,p.y-6,12,12); } }
+            else{ ctx.fillStyle="#f6d26b"; ctx.fillRect(p.x-6,p.y-6,12,12); }
+          }
+
+          const c = worldToScreen(r.cx,r.cy);
+          if(r.up) drawStairs(c.x,c.y,true);
+          if(r.down) drawStairs(c.x,c.y,false,!S.hasKey);
+          if(r.key && !S.hasKey) drawKey(c.x,c.y-8);
+          if(r.monster) drawMonster(c.x-10,c.y-10);
+          if(r.chest) drawChest(c.x+10,c.y+6);
+        }else if(S.visited.has(r.id)){
+          ctx.fillStyle="#1a1327"; ctx.fillRect(rx,ry,rw,rh);
+          ctx.strokeStyle="#3b2a56"; ctx.lineWidth=4; ctx.strokeRect(rx,ry,rw,rh);
+        }
+      });
+
+      const P = worldToScreen(S.player.x,S.player.y);
+      ctx.fillStyle="#63d297"; ctx.beginPath(); ctx.arc(P.x,P.y,9,0,Math.PI*2); ctx.fill();
+      ctx.strokeStyle="#f6d26b"; ctx.lineWidth=3; ctx.strokeRect(P.x-7,P.y-13,14,7);
+
+      coord.textContent = `Room ${S.curId+1}  (${S.visited.size} explored)`;
+    }
+    function drawStairs(x,y,up=true,locked=false){ const c=ctx; c.fillStyle = up? "#a7b2c3" : "#f6d26b"; for(let i=0;i<4;i++) c.fillRect(x-16, y-8+i*5, 32-i*6, 3); if(!up && locked){ c.fillStyle="rgba(255,88,104,0.45)"; c.fillRect(x-18,y-14,36,28); } }
+    function drawKey(x,y){ const c=ctx; c.fillStyle="#ffd966"; c.fillRect(x-8,y-2,16,4); c.beginPath(); c.arc(x-10,y,6,0,Math.PI*2); c.fill(); c.fillStyle="#120e1c"; c.beginPath(); c.arc(x-10,y,3,0,Math.PI*2); c.fill(); }
+    function drawMonster(x,y){ const c=ctx; c.fillStyle="#ff5868"; c.fillRect(x,y,20,20); c.fillStyle="#120e1c"; c.fillRect(x+3,y+5,4,4); c.fillRect(x+13,y+5,4,4); }
+    function drawChest(x,y){ const c=ctx; c.fillStyle="#d9b37d"; c.fillRect(x-12,y-8,24,16); c.fillStyle="#614c3b"; c.fillRect(x-12,y-12,24,6); c.fillStyle="#f6d26b"; c.fillRect(x-2,y-2,4,6); }
+
+    function pickRoomAtWorld(wx,wy){ for(const r of S.rooms){ if(wx>=r.x && wx<=r.x+r.w && wy>=r.y && wy<=r.y+r.h) return r; } return null; }
+    function onMouseMove(ev){
+      if(S.anim) return;
+      const rect = canvas.getBoundingClientRect(); const px=ev.clientX-rect.left, py=ev.clientY-rect.top;
+      const w = screenToWorld(px,py); const r = pickRoomAtWorld(w.x,w.y);
+      let newHoverId=null, newPath=null, reachable=false, cursor='crosshair';
+      if(r){
+        const vis = visibleSet();
+        const clickable = vis.has(r.id) || S.visited.has(r.id);
+        if(clickable){ newHoverId=r.id; cursor='pointer'; newPath=path(S.curId,r.id); reachable=!!newPath && newPath.length>1; }
+      }
+      S.hoverId=newHoverId; S.hoverPath=newPath; S.hoverReachable=reachable; canvas.style.cursor=cursor; draw();
+    }
+    function onClick(){ if(S.anim) return; if(S.hoverPath && S.hoverReachable && S.hoverPath.length>1) beginMove(S.hoverPath); }
+    function onKeyDown(e){
+      if(S.anim) return;
+      if(e.key==='r'||e.key==='R'){ generate(false); return; }
+      if(e.key==='e'||e.key==='E'){ doSearch(); return; }
+      let dir=null;
+      if(['ArrowUp','w','W'].includes(e.key)) dir='N';
+      else if(['ArrowDown','s','S'].includes(e.key)) dir='S';
+      else if(['ArrowLeft','a','A'].includes(e.key)) dir='W';
+      else if(['ArrowRight','d','D'].includes(e.key)) dir='E';
+      if(!dir) return;
+      const cur = roomById(S.curId);
+      const opts = (S.adj.get(S.curId)||[]).filter(e=>!(e.type==='secret' && !e.revealed)).map(e=>roomById(e.to));
+      const want = {N:o=>o.cy<cur.cy, S:o=>o.cy>cur.cy, W:o=>o.cx<cur.cx, E:o=>o.cx>cur.cx}[dir];
+      const cand = opts.filter(want); if(!cand.length) return;
+      let best=cand[0], dBest=Infinity; cand.forEach(o=>{ const d=Math.hypot(o.cx-cur.cx,o.cy-cur.cy); if(d<dBest){ dBest=d; best=o; } });
+      beginMove([S.curId, best.id]);
+    }
+    function fitCanvas(){
+      const dpr = window.devicePixelRatio||1; const wrap = canvasWrap.getBoundingClientRect();
+      canvas.width = Math.floor(wrap.width*dpr); canvas.height=Math.floor(Math.min(wrap.height,760)*dpr);
+      ctx.setTransform(dpr,0,0,dpr,0,0); computeView(); draw();
+    }
+
+    function generate(levelUp=false){
+      if(levelUp) S.level++;
+      const leaves=[]; splitLeaf({x:WORLD.x,y:WORLD.y,w:WORLD.w,h:WORLD.h},0,leaves);
+      S.rooms = makeRooms(leaves); connectRooms(S.rooms); specials(); populate();
+      document.getElementById('levelNum').textContent = S.level; lvlLabel.textContent=S.level;
+      hint.textContent = "Hover any visible room to preview the path.";
+      computeView(); draw(); SFX.bleep(720);
+    }
+
+    // boot (fresh run resets hero HP/MP to max)
+    if(fresh){
+      const m = computeMaxFromStats(hero.stats);
+      hero.hp = m.maxHP; hero.mp = m.maxMP; saveHeroActive(hero);
+    }
+    fitCanvas(); generate(false);
+
+    // events
+    canvas.addEventListener('mousemove', onMouseMove);
+    canvas.addEventListener('click', onClick);
+    window.addEventListener('resize', fitCanvas);
+    document.addEventListener('keydown', onKeyDown);
+
+    return {
+      destroy(){
+        cancelAnimationFrame(animReq);
+        canvas.removeEventListener('mousemove', onMouseMove);
+        canvas.removeEventListener('click', onClick);
+        window.removeEventListener('resize', fitCanvas);
+        document.removeEventListener('keydown', onKeyDown);
+      },
+      refreshHeroPanel
+    };
+  }
+
+  return { mount };
+})();
+
+/* ===========================
+   MODULE: Combat Screen
+=========================== */
+const CombatScreen = (function(){
+  function mount(container, hero, inventory, config, onEnd){
+    container.innerHTML='';
+    const wrap = document.createElement('div'); wrap.className='panel'; wrap.style.display='grid'; wrap.style.gridTemplateRows='auto 1fr auto'; wrap.style.gap='10px';
+
+    const head = document.createElement('div'); head.style.display='flex'; head.style.alignItems='center'; head.style.justifyContent='space-between';
+    const title = document.createElement('div'); title.className='title'; title.textContent='THE DUNGEON BELOW — Combat';
+    const btns = document.createElement('div');
+    const newBtn = document.createElement('button'); newBtn.className='btn'; newBtn.textContent='Restart Battle';
+    btns.append(newBtn); head.append(title, btns);
+
+    const arena = document.createElement('div'); arena.style.position='relative'; arena.style.height='520px';
+    arena.style.border='3px solid #4a356c'; arena.style.borderRadius='12px'; arena.style.background='radial-gradient(600px 300px at 30% 30%, rgba(246,210,107,.09), transparent 60%), radial-gradient(600px 300px at 70% 70%, rgba(99,210,151,.06), transparent 60%), #110a1b';
+    arena.style.overflow='hidden';
+
+    const tilesWrap = document.createElement('div'); tilesWrap.style.position='absolute'; tilesWrap.style.inset='0'; tilesWrap.style.display='grid'; tilesWrap.style.gridTemplateColumns='1fr 1fr'; tilesWrap.style.padding='18px 24px';
+    const allyCol = document.createElement('div'); allyCol.style.display='grid'; allyCol.style.alignContent='center'; allyCol.style.gap='26px';
+    const enemyCol = document.createElement('div'); enemyCol.style.display='grid'; enemyCol.style.alignContent='center'; enemyCol.style.gap='26px';
+    const aTiles = [0,1,2].map(()=>{ const t=document.createElement('div'); t.className='tile'; t.style.height='140px'; t.style.border='3px dashed #3b2a56'; t.style.borderRadius='12px'; t.style.position='relative'; t.style.display='flex'; t.style.alignItems='center'; t.style.justifyContent='center'; t.style.background='rgba(255,255,255,.02)'; t.style.overflow='hidden'; return t; });
+    const eTiles = [0,1,2].map(()=>{ const t=document.createElement('div'); t.className='tile'; t.style.height='140px'; t.style.border='3px dashed #3b2a56'; t.style.borderRadius='12px'; t.style.position='relative'; t.style.display='flex'; t.style.alignItems='center'; t.style.justifyContent='center'; t.style.background='rgba(255,255,255,.02)'; t.style.overflow='hidden'; return t; });
+    aTiles.forEach(t=>allyCol.append(t)); eTiles.forEach(t=>enemyCol.append(t));
+    tilesWrap.append(allyCol, enemyCol); arena.append(tilesWrap);
+
+    const ui = document.createElement('div'); ui.style.display='grid'; ui.style.gridTemplateColumns='1fr 2fr'; ui.style.gap='10px';
+    const actions = document.createElement('div'); actions.className='panel';
+    const row = document.createElement('div'); row.style.display='flex'; row.style.gap='8px'; row.style.flexWrap='wrap';
+    const actAttack = document.createElement('button'); actAttack.className='btn small'; actAttack.textContent='Attack';
+    const actDefend = document.createElement('button'); actDefend.className='btn small'; actDefend.textContent='Defend';
+    const actMagic = document.createElement('button'); actMagic.className='btn small'; actMagic.textContent='Magic';
+    row.append(actAttack,actDefend,actMagic);
+    const spellsWrap = document.createElement('div'); spellsWrap.style.display='flex'; spellsWrap.style.gap='8px'; spellsWrap.style.flexWrap='wrap'; spellsWrap.style.marginTop='8px';
+    const hint = document.createElement('div'); hint.style.opacity='.85'; hint.style.fontSize='16px'; hint.textContent='Tip: Timers fill faster with higher Agility. +5 MP after your actions.';
+    actions.append(row, spellsWrap, hint);
+
+    const log = document.createElement('div'); log.className='panel'; log.style.minHeight='128px'; log.style.overflow='auto'; log.style.fontSize='16px';
+    ui.append(actions, log);
+
+    wrap.append(head, arena, ui);
+    container.append(wrap);
+
+    /* combat state */
+    const BASE_INTERVAL = 3.0;
+    let running=false, paused=false, lastTS=null, raf=0;
+    const state = { allies:[null,null,null], enemies:[null,null,null], actorMenu:null };
+
+    function logMsg(html){ const d=document.createElement('div'); d.innerHTML=html; log.append(d); log.scrollTop = log.scrollHeight; }
+    function el(tag, cls){ const x=document.createElement(tag); if(cls) x.className=cls; return x; }
+    function clamp(v,a,b){ return Math.max(a, Math.min(b, v)); }
+    function rnd(a,b){ return a + Math.random()*(b-a); }
+    function irand(a,b){ return Math.floor(rnd(a,b+1)); }
+    function intervalSeconds(u){ return BASE_INTERVAL / (u.stats.agi * (u.goopMult || 1.0)); }
+    function damageRoll(base, targetDef){ return Math.max(1, Math.floor(base * rnd(0.9,1.1) - targetDef*0.6)); }
+
+    function setupTile(host){
+      host.innerHTML='';
+      const unit = el('div','unit'); unit.style.position='absolute'; unit.style.inset='0'; unit.style.display='flex'; unit.style.alignItems='center'; unit.style.justifyContent='center'; unit.style.pointerEvents='none'; unit.style.zIndex='1'; host.appendChild(unit);
+      const cvs = document.createElement('canvas'); cvs.width=96; cvs.height=96; cvs.style.width='96px'; cvs.style.height='96px'; cvs.className='sprite'; unit.appendChild(cvs);
+      // name/status top
+      const name = el('div','nameplate'); name.style.position='absolute'; name.style.top='4px'; name.style.left='8px'; name.style.right='8px'; name.style.zIndex='3'; name.style.fontFamily='"Press Start 2P"'; name.style.fontSize='11px'; name.style.color='var(--amber)'; name.style.textAlign='center'; name.style.textShadow='2px 2px 0 #000'; host.appendChild(name);
+      const chips = el('div','statusChips'); chips.style.position='absolute'; chips.style.top='24px'; chips.style.left='8px'; chips.style.display='flex'; chips.style.gap='6px'; chips.style.zIndex='3'; host.appendChild(chips);
+      // bars bottom
+      const wrap = el('div','barWrap'); wrap.style.position='absolute'; wrap.style.left='8px'; wrap.style.right='8px'; wrap.style.bottom='8px'; wrap.style.display='grid'; wrap.style.gap='6px'; wrap.style.zIndex='3';
+      function bar(kind, label){ const w=el('div','bar '+kind); w.style.height='14px'; w.style.border='2px solid #4a356c'; w.style.background='#150f23'; w.style.borderRadius='8px'; w.style.overflow='hidden'; w.style.position='relative'; const f=el('div','fill'); f.style.height='100%'; f.style.background='linear-gradient(90deg, var(--c, #ffd966), #ffffff40)'; const L=el('div','barLabel'); L.style.position='absolute'; L.style.inset='0'; L.style.display='flex'; L.style.alignItems='center'; L.style.justifyContent='center'; L.style.fontSize='13px'; L.style.color='#e9e5d0cc'; L.style.textShadow='2px 2px 0 #000'; w.append(f,L); return {w,f,L}; }
+      const hp = bar('hp'); hp.w.style.setProperty('--c', '#ff5868');
+      const mp = bar('mp'); mp.w.style.setProperty('--c', '#63d297');
+      const atb = bar('atb'); atb.w.style.setProperty('--c', '#ffd966');
+      wrap.append(hp.w, mp.w, atb.w); host.appendChild(wrap);
+      return {canvas:cvs, ui:{name,chips, bars:{hp:hp.f, hpLbl:hp.L, mp:mp.f, mpLbl:mp.L, atb:atb.f, atbLbl:atb.L}}, unitDiv:unit, host};
+    }
+    function setActive(u,on){ if(u) u.tile.host.style.boxShadow = on ? '0 0 0 4px rgba(99,210,151,0.45) inset, 0 0 18px 6px rgba(99,210,151,0.35)' : ''; }
+    function spawnPopup(tile, text, color="#ffd966"){
+      const p = document.createElement('div'); p.className='popup';
+      p.style.position='absolute'; p.style.left='50%'; p.style.top='40%'; p.style.transform='translate(-50%,-50%)';
+      p.style.fontSize='18px'; p.style.padding='2px 6px'; p.style.borderRadius='8px'; p.style.pointerEvents='none'; p.style.whiteSpace='nowrap';
+      p.style.animation='pop 700ms ease-out forwards'; p.style.textShadow='2px 2px 0 #000'; p.style.zIndex='4'; p.style.color=color; p.textContent=text;
+      tile.host.appendChild(p); setTimeout(()=>p.remove(), 720);
+    }
+    function aura(tile,color){ const a=document.createElement('div'); a.style.position='absolute'; a.style.inset='0'; a.style.borderRadius='12px'; a.style.pointerEvents='none'; a.style.opacity='0'; a.style.zIndex='2'; a.style.boxShadow=`0 0 24px 6px ${color} inset, 0 0 24px 6px ${color}`; a.style.background=`${color}22`; a.animate([{opacity:0},{opacity:.9,offset:.3},{opacity:0}],{duration:420}); tile.host.appendChild(a); setTimeout(()=>a.remove(), 450); }
+    function shieldFlash(tile){ const s=document.createElement('div'); s.style.position='absolute'; s.style.inset='0'; s.style.display='flex'; s.style.alignItems='center'; s.style.justifyContent='center'; s.style.pointerEvents='none'; s.style.opacity='0'; s.style.zIndex='2'; s.style.fontSize='36px'; s.style.textShadow='2px 2px 0 #000'; s.textContent='🛡'; s.animate([{opacity:0,transform:'scale(.8)'},{opacity:1,transform:'scale(1)',offset:.4},{opacity:0,transform:'scale(1.1)'}],{duration:500}); tile.host.appendChild(s); setTimeout(()=>s.remove(), 520); }
+
+    function drawHeroSprite(canvas){ drawPixelSprite(canvas, MAPS[hero.key]||MAPS.warrior, PALETTES[hero.key]||PALETTES.warrior, 6); }
+    function drawHelperSprite(canvas){ const ctx=canvas.getContext('2d'); ctx.clearRect(0,0,96,96); ctx.fillStyle="#6de2f8"; for(let i=0;i<6;i++){ ctx.beginPath(); ctx.arc(48, 60-i*8, 12-i, 0, Math.PI*2); ctx.fill(); } }
+    function drawSlime(canvas, color){ const ctx=canvas.getContext('2d'); ctx.clearRect(0,0,96,96); ctx.fillStyle=color; ctx.fillRect(20,48,56,24); ctx.beginPath(); ctx.moveTo(20,48); ctx.bezierCurveTo(24,32,72,32,76,48); ctx.lineTo(76,72); ctx.lineTo(20,72); ctx.closePath(); ctx.fill(); ctx.fillStyle="#120a1b"; ctx.fillRect(36,50,8,6); ctx.fillRect(56,50,8,6); ctx.fillRect(44,62,8,3); }
+
+    function updateBars(u){
+      const hpP = Math.round(100 * u.hp / u.stats.maxHP);
+      const mpP = Math.round(100 * (u.mp||0) / (u.stats.maxMP||1));
+      const itv = intervalSeconds(u);
+      const atbP = clamp(Math.round(100 * (u.tAccum / itv)), 0, 100);
+      u.tile.ui.bars.hp.style.width = hpP+'%'; u.tile.ui.bars.hpLbl.textContent = `HP ${u.hp}/${u.stats.maxHP}`;
+      u.tile.ui.bars.mp.style.width = mpP+'%'; u.tile.ui.bars.mpLbl.textContent = `MP ${u.mp||0}/${u.stats.maxMP||0}`;
+      u.tile.ui.bars.atb.style.width = atbP+'%'; u.tile.ui.bars.atbLbl.textContent = u.ready ? 'READY' : `${(itv - u.tAccum).toFixed(1)}s`;
+      const chips = u.tile.ui.chips; chips.innerHTML='';
+      if(u.guarding) chips.append(chip('Guard','green'));
+      if(u.goopTime>0) chips.append(chip(`Gooped ${u.goopTime.toFixed(1)}s`,'red'));
+    }
+    function chip(text, color){ const c=el('div','chip '+color); c.style.fontSize='11px'; c.style.padding='3px 6px'; c.style.borderRadius='8px'; c.style.border='2px solid #4a356c'; c.style.background='#1b1328bb'; c.style.color=(color==='green'?'#9be0be': color==='red'?'#ff9cab':'#ffd966'); c.textContent=text; return c; }
+
+    function persistHeroHPMP(h){
+      // write current hp/mp back
+      saveHeroActive(h);
+    }
+
+    function mkAllyFromHero(slotIndex){
+      const t = aTiles[slotIndex]; const tile = setupTile(t);
+      const base = computeMaxFromStats(hero.stats,false);
+      const u = {
+        id:'hero', side:'ally', name:hero.name||'Hero', slot:slotIndex, tile, stats:base,
+        hp: clamp(hero.hp==null?base.maxHP:hero.hp, 1, base.maxHP),
+        mp: clamp(hero.mp==null?base.maxMP:hero.mp, 0, base.maxMP),
+        ready:false, acting:false, tAccum: rnd(0, intervalSeconds({stats:base})*0.8),
+        guarding:false, goopMult:1.0, goopTime:0, canCast:true, isHelper:false, dead:false,
+        spells:[
+          {id:'bolt', name:'Lightning Bolt', cost:20},
+          {id:'inferno', name:'Inferno', cost:40},
+          {id:'summon', name:'Summon', cost:50}
+        ]
+      };
+      drawHeroSprite(tile.canvas);
+      tile.ui.name.textContent = `${u.name} (Lv ${hero.level||1})`;
+      updateBars(u);
+      return u;
+    }
+    function mkHelper(slotIndex){
+      const t=aTiles[slotIndex]; const tile=setupTile(t);
+      const base = computeMaxFromStats(hero.stats,true);
+      const u = {
+        id:'helper-'+Date.now(), side:'ally', name:'Helper', slot:slotIndex, tile, stats:base,
+        hp:base.maxHP, mp:0, ready:false, acting:false, tAccum:rnd(0, intervalSeconds({stats:base})*0.6),
+        guarding:false, goopMult:1.0, goopTime:0, canCast:false, isHelper:true, dead:false, spells:[]
+      };
+      drawHelperSprite(tile.canvas); tile.ui.name.textContent='Helper'; updateBars(u); return u;
+    }
+    function mkSlime(slotIndex, n){
+      const t=eTiles[slotIndex]; const tile=setupTile(t);
+      const lvl=Math.max(1, hero.level||1);
+      const hp = 45 + lvl*6 + irand(0,6);
+      const mp = 30 + lvl*4;
+      const u = {
+        id:'slime-'+n, side:'enemy', name:'Slime', slot:slotIndex, tile,
+        stats:{maxHP:hp, maxMP:mp, atk:8+lvl*1.2, def:3+lvl*0.8, mag:6+lvl, agi:1+0.1+0.04*lvl},
+        hp, mp, ready:false, acting:false, tAccum:rnd(0, intervalSeconds({stats:{agi:1+0.04*lvl}})*0.9),
+        guarding:false, goopMult:1.0, goopTime:0, dead:false, spells:[{id:'goop', name:'Goop Spray', cost:12}]
+      };
+      drawSlime(tile.canvas, ["#7eea7a","#64d462","#4fbd4d"][n%3]); tile.ui.name.textContent='Slime'; updateBars(u); return u;
+    }
+
+    function lunge(attacker, dir){ return new Promise(res=>{ const u=attacker.tile.unitDiv; u.style.transition='transform .12s ease'; u.style.transform=`translateX(${dir*18}px)`; setTimeout(()=>{ u.style.transform='translateX(0)'; setTimeout(res,130);},140); }); }
+    function randomLiving(units){ const alive = units.filter(x=>x && !x.dead && x.hp>0); return alive.length? alive[irand(0,alive.length-1)] : null; }
+
+    function doAttack(attacker, target){
+      setActive(attacker,true);
+      const dir = attacker.side==='ally'? +1 : -1;
+      lunge(attacker, dir).then(()=>{
+        let dmg = damageRoll(attacker.stats.atk, target.stats.def);
+        if(target.guarding){ dmg=Math.floor(dmg*0.5); target.guarding=false; }
+        target.hp = clamp(target.hp - dmg, 0, target.stats.maxHP);
+        spawnPopup(target.tile, `-${dmg}`, '#ff9cab');
+        logMsg(`<span style="color:${attacker.side==='ally'?'#63d297':'#ff5868'}">${attacker.name}</span> attacks ${target.name} for <b>${dmg}</b>.`);
+        SFX.bleep(700);
+        if(target.id==='hero'){ hero.hp = target.hp; persistHeroHPMP(hero); } // persist damage to hero
+        afterAction(attacker); markKOs(); checkEnd(); setActive(attacker,false);
+      });
+    }
+    function doDefend(u){ u.guarding=true; shieldFlash(u.tile); logMsg(`${u.name} braces for impact.`); SFX.bleep(520); afterAction(u); markKOs(); checkEnd(); }
+    function doBolt(caster, target){
+      if((caster.mp||0)<20){ logMsg(`Not enough MP.`); return false; }
+      caster.mp -= 20; if(caster.id==='hero'){ hero.mp=caster.mp; persistHeroHPMP(hero); }
+      aura(caster.tile, '#ffd84a');
+      setTimeout(()=>{
+        let dmg = Math.floor(caster.stats.mag*1.6 + rnd(6,10)) - Math.floor(target.stats.def*0.4);
+        if(target.guarding){ dmg=Math.floor(dmg*0.5); target.guarding=false; }
+        dmg=Math.max(1,dmg); target.hp=clamp(target.hp-dmg,0,target.stats.maxHP);
+        spawnPopup(target.tile, `⚡ ${dmg}`, '#ffe066'); logMsg(`${caster.name} casts <b>Lightning Bolt</b> on ${target.name}.`); SFX.bleep(880);
+        afterAction(caster); markKOs(); checkEnd();
+      },200);
+      return true;
+    }
+    function doInferno(caster, targets){
+      if((caster.mp||0)<40){ logMsg(`Not enough MP.`); return false; }
+      caster.mp -= 40; if(caster.id==='hero'){ hero.mp=caster.mp; persistHeroHPMP(hero); }
+      aura(caster.tile, '#ff5a5a');
+      setTimeout(()=>{
+        targets.forEach(t=>{
+          if(!t || t.dead) return;
+          let dmg = Math.floor(caster.stats.mag*1.2 + rnd(4,8)) - Math.floor(t.stats.def*0.35);
+          if(t.guarding){ dmg=Math.floor(dmg*0.5); t.guarding=false; }
+          dmg=Math.max(1,dmg); t.hp=clamp(t.hp-dmg,0,t.stats.maxHP);
+          spawnPopup(t.tile, `🔥 ${dmg}`, '#ffd3b3');
+        });
+        logMsg(`${caster.name} unleashes <b>Inferno</b>!`); SFX.bleep(940);
+        afterAction(caster); markKOs(); checkEnd();
+      },200);
+      return true;
+    }
+    function firstFreeAllySlot(){ for(const i of [0,2]) if(!state.allies[i] || state.allies[i].dead) return i; return null; }
+    function doSummon(caster){
+      if((caster.mp||0)<50){ logMsg(`Not enough MP.`); return false; }
+      const slot = firstFreeAllySlot(); if(slot==null){ logMsg(`No space to summon.`); return false; }
+      caster.mp -= 50; if(caster.id==='hero'){ hero.mp=caster.mp; persistHeroHPMP(hero); }
+      aura(caster.tile, '#67d8ff');
+      setTimeout(()=>{ const helper = mkHelper(slot); state.allies[slot]=helper; spawnPopup(helper.tile, `+Helper`, '#9be0ff'); logMsg(`${caster.name} summons a helper!`); SFX.bleep(840); afterAction(caster); markKOs(); checkEnd(); },200);
+      return true;
+    }
+    function doGoop(attacker, target){
+      if(attacker.mp >= 12){ attacker.mp -= 12; }
+      aura(attacker.tile, '#78e07a');
+      setTimeout(()=>{
+        const base = Math.floor(attacker.stats.mag*0.6 + rnd(2,4));
+        let dmg = base - Math.floor(target.stats.def*0.3);
+        if(target.guarding){ dmg=Math.floor(dmg*0.5); target.guarding=false; }
+        dmg=Math.max(1,dmg); target.hp = clamp(target.hp - dmg, 0, target.stats.maxHP);
+        target.goopMult = (target.goopMult||1)*0.8; target.goopTime = 6.0;
+        spawnPopup(target.tile, `🧪 ${dmg}`, '#9be0be'); logMsg(`Slime uses <b>Goop Spray</b> — ${target.name} is slowed.`); SFX.bleep(600);
+        if(target.id==='hero'){ hero.hp = target.hp; persistHeroHPMP(hero); }
+        afterAction(attacker); markKOs(); checkEnd();
+      },200);
+    }
+
+    function afterAction(u){
+      // +5 MP after HERO action
+      if(u.id==='hero'){
+        const m = computeMaxFromStats(hero.stats);
+        u.mp = Math.min(m.maxMP, (u.mp||0) + 5);
+        hero.mp = u.mp; persistHeroHPMP(hero);
+      }
+      u.tAccum=0; u.ready=false; u.acting=false; updateBars(u);
+    }
+    function markKOs(){ [...state.allies, ...state.enemies].forEach(u=>{ if(!u) return; if(u.hp<=0 && !u.dead){ u.dead=true; u.guarding=false; u.acting=false; if(u.tile && u.tile.ui) u.tile.ui.name.textContent += ' [KO]'; } }); }
+    function anyAlive(units){ return units.some(u=>u && u.hp>0 && !u.dead); }
+    function checkEnd(){
+      if(!running) return;
+      const heroU = state.allies[1];
+      if(!heroU || heroU.hp<=0){ endBattle(false); return; }
+      if(!anyAlive(state.enemies)){ endBattle(true); }
+    }
+
+    function enemyAI(u){
+      setActive(u,true);
+      const roll = Math.random(); const target = randomLiving(state.allies); if(!target){ setActive(u,false); return; }
+      if(u.mp>=12 && roll<0.35){ doGoop(u, target); }
+      else if(roll<0.15){ doDefend(u); setActive(u,false); }
+      else{ doAttack(u, target); }
+    }
+
+    function tick(ts){
+      if(!running || paused){ lastTS=ts; raf=requestAnimationFrame(tick); return; }
+      if(lastTS==null) lastTS=ts;
+      let dt = Math.min(0.05, (ts-lastTS)/1000); lastTS=ts;
+
+      [...state.allies, ...state.enemies].forEach(u=>{
+        if(!u || u.dead) return;
+        if(u.goopTime>0){ u.goopTime -= dt; if(u.goopTime<=0){ u.goopTime=0; u.goopMult=1.0; } }
+        const itv = intervalSeconds(u);
+        if(!u.ready && !u.acting){
+          u.tAccum += dt;
+          if(u.tAccum >= itv){ u.ready = true; }
+        }
+        updateBars(u);
+      });
+
+      // always mark/check
+      markKOs(); checkEnd(); if(!running){ return; }
+
+      if(!state.actorMenu){
+        const enemyReady = state.enemies.find(u=>u && u.ready && !u.acting && !u.dead && u.hp>0);
+        if(enemyReady){ enemyReady.ready=false; enemyReady.acting=true; enemyAI(enemyReady); }
+        else{
+          const allyReady = state.allies.find(u=>u && u.ready && !u.acting && !u.dead && u.hp>0);
+          if(allyReady){ allyReady.ready=false; allyReady.acting=true; openMenu(allyReady); }
+        }
+      }
+
+      raf = requestAnimationFrame(tick);
+    }
+
+    function targetSelect(candidates, prompt){
+      hint.textContent = prompt;
+      return new Promise(resolve=>{
+        const clickable=[];
+        candidates.forEach(u=>{
+          if(!u || u.dead) return;
+          const high = document.createElement('div'); high.style.position='absolute'; high.style.inset='0'; high.style.border='3px dashed #63d297'; high.style.borderRadius='12px'; high.style.pointerEvents='auto'; high.style.cursor='pointer';
+          u.tile.canvas.parentElement.parentElement.append(high);
+          high.onclick = ()=>{ cleanup(); resolve(u); };
+          clickable.push(high);
+        });
+        function cleanup(){ clickable.forEach(h=>h.remove()); }
+        const abort = (e)=>{ if(!clickable.some(h=>h.contains(e.target))){ cleanup(); resolve(null); document.removeEventListener('click', abort, true); } };
+        setTimeout(()=>document.addEventListener('click', abort, true),0);
+      });
+    }
+
+    function openMenu(u){
+      paused=true; state.actorMenu=u; setActive(u,true);
+      spellsWrap.innerHTML='';
+      actAttack.classList.remove('disabled'); actDefend.classList.remove('disabled'); actMagic.classList.remove('disabled');
+
+      actAttack.onclick = ()=>{
+        targetSelect(state.enemies, 'Choose a target for Attack').then(target=>{
+          if(!target){ cancelTurn(u); return; }
+          doAttack(u, target); resume(true);
+        });
+      };
+      actDefend.onclick = ()=>{ doDefend(u); resume(true); };
+      actMagic.onclick = ()=>{
+        spellsWrap.innerHTML='';
+        (u.spells||[]).forEach(sp=>{
+          const b=document.createElement('button'); b.className='btn small'; b.textContent=`${sp.name} (${sp.cost} MP)`; if((u.mp||0)<sp.cost) b.classList.add('disabled');
+          b.onclick = ()=>{
+            if(sp.id==='bolt'){
+              targetSelect(state.enemies,'Choose a target for Lightning').then(t=>{ if(!t){ cancelTurn(u); return; } if(doBolt(u,t)) resume(true); });
+            }else if(sp.id==='inferno'){
+              if(doInferno(u, state.enemies.filter(x=>x && !x.dead))) resume(true);
+            }else if(sp.id==='summon'){
+              if(doSummon(u)) resume(true);
+            }
+          };
+          spellsWrap.append(b);
+        });
+      };
+    }
+    function cancelTurn(u){ u.ready=true; u.acting=false; setActive(u,false); spellsWrap.innerHTML=''; state.actorMenu=null; paused=false; }
+    function resume(clearGlow=false){ spellsWrap.innerHTML=''; if(clearGlow && state.actorMenu) setActive(state.actorMenu,false); state.actorMenu=null; paused=false; }
+
+    function placeAllies(){ state.allies=[null,null,null]; state.allies[1] = mkAllyFromHero(1); }
+    function placeEnemies(count){
+      state.enemies=[null,null,null];
+      const order = (count===1)?[1]:(count===2?[0,2]:[0,1,2]);
+      order.forEach((slot,i)=> state.enemies[slot]=mkSlime(slot,i));
+    }
+
+    function startBattle(){
+      log.innerHTML=''; aTiles.concat(eTiles).forEach(t=>t.innerHTML=''); placeAllies(); placeEnemies(config.count||irand(1,3));
+      running=true; paused=false; lastTS=null; raf=requestAnimationFrame(tick);
+      logMsg(`<b>Battle started!</b>`); SFX.bleep(760);
+    }
+    function endBattle(playerWon){
+      running=false; paused=true;
+      // compute rewards on victory
+      if(playerWon){
+        const alive = state.enemies.filter(x=>x).length;
+        const xpGain = 12 * alive + irand(0,6);
+        const loot = []; const gold = irand(8,30); if(gold){ inventory.gold += gold; loot.push(`${gold} gold`); }
+        const itemsPool = ['Slime Goo','Sticky Resin','Green Core','Cracked Vial'];
+        if(Math.random()<0.6){ const it = itemsPool[irand(0,itemsPool.length-1)]; inventory.items.push(it); loot.push(it); }
+        saveInventory(hero, inventory);
+        // return to app
+        onEnd && onEnd({victory:true, xp:xpGain, gold, items: loot.filter(x=>!x.endsWith('gold')) });
+      }else{
+        onEnd && onEnd({victory:false});
+      }
+    }
+
+    newBtn.onclick = ()=>{ startBattle(); };
+
+    // start
+    startBattle();
+
+    return {
+      destroy(){ cancelAnimationFrame(raf); /* all listeners are on buttons in DOM we discard */ }
+    };
+  }
+
+  return { mount };
+})();
+
+/* ===========================
+   BOOT
+=========================== */
+(function boot(){
+  const existing = loadHeroActive();
+  if(existing){ App.hero = existing; App.inventory = loadInventory(existing); goMap(true); }
+  else{ goCreator(); }
+})();
+</script>
+</body>
+</html>

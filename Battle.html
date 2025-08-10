@@ -1,9 +1,17 @@
+Great catch — I rebuilt the battle file to fix both issues:
+
+* **Action/timer bars are now always visible** (name at top, status chips under it, HP/MP/ATB at the bottom with higher z-index).
+* **No more multi-actions**: each unit now has an `acting` lock. As soon as a unit’s turn starts, we mark `ready=false` and `acting=true`, so the ticker can’t pick them again until their action finishes and `afterAction()` clears the lock.
+
+I also kept the glow-on-active and the attack/magic/defend animations. Drop this in as `battle_plus_fix.html`:
+
+```html
 <!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Retro RPG — Combat</title>
+<title>Retro RPG — Combat+ (Fixed)</title>
 <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
 <style>
   :root{
@@ -22,11 +30,13 @@
   header{display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;}
   .title{font-family:"Press Start 2P"; color:var(--gold); font-size:20px; text-shadow:2px 2px 0 #6b4e10, 4px 4px 0 #2a1d3c;}
   .btn{font-family:"Press Start 2P"; font-size:12px; background:#211632; color:var(--ink); border:3px solid #4a356c; border-radius:12px; padding:10px 12px; cursor:pointer}
-  .btn:active{transform:translateY(2px)}
+  .btn:active{transform:translateY(2px)} .btn.small{font-size:11px; padding:8px 10px}
+  .btn.alt{border-color:#6b4e10} .btn.disabled{opacity:.5; pointer-events:none}
+
   .grid{
     background:linear-gradient(#2e2147,#1b1328); border:4px solid var(--rim); border-image:linear-gradient(180deg,#a9842b,#6b4e10) 1;
     border-radius:14px; box-shadow:0 10px 0 #0a0710, 0 14px 0 #07050b; padding:12px;
-    display:grid; grid-template-columns:1fr; gap:10px;
+    display:grid; grid-template-rows:auto 1fr auto; gap:10px;
   }
   .arena{
     position:relative; height:520px; border:3px solid #4a356c; border-radius:12px; background:
@@ -37,43 +47,70 @@
   }
   .sideLabel{position:absolute; top:8px; font-family:"Press Start 2P"; font-size:11px; opacity:.8}
   .sideLabel.left{left:12px} .sideLabel.right{right:12px}
-  .tiles{
-    position:absolute; inset:0; display:grid; grid-template-columns:1fr 1fr; padding:18px 24px;
-  }
+  .tiles{ position:absolute; inset:0; display:grid; grid-template-columns:1fr 1fr; padding:18px 24px; }
   .col{display:grid; align-content:center; gap:26px}
   .tile{
     height:140px; border:3px dashed #3b2a56; border-radius:12px; position:relative; display:flex; align-items:center; justify-content:center;
-    background:rgba(255,255,255,.02);
+    background:rgba(255,255,255,.02); overflow:hidden;
+  }
+  .tile.active{
+    box-shadow:0 0 0 4px rgba(99,210,151,0.45) inset, 0 0 18px 6px rgba(99,210,151,0.35);
+    border-color:#63d297;
   }
   .unit{
     position:absolute; inset:0; display:flex; align-items:center; justify-content:center; pointer-events:none;
+    transition: transform .18s ease; z-index:1;
   }
   .sprite{ width:96px; height:96px; image-rendering:pixelated; }
-  .barWrap{
-    position:absolute; left:8px; right:8px; bottom:-6px; display:grid; gap:4px;
+  /* Name + statuses pinned at top INSIDE tile (never clipped) */
+  .nameplate{
+    position:absolute; top:4px; left:8px; right:8px; z-index:3;
+    font-family:"Press Start 2P"; font-size:11px; color:var(--amber); text-align:center; text-shadow:2px 2px 0 #000;
   }
-  .bar{height:12px; border:2px solid #4a356c; background:#150f23; border-radius:8px; overflow:hidden; position:relative}
-  .hp{--c:#ff5868} .mp{--c:#63d297} .atb{--c:#ffd966}
-  .fill{height:100%; width:0%; background:linear-gradient(90deg, var(--c), #ffffff40)}
-  .barLabel{position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:13px; color:#e9e5d0cc}
-  .statusChips{position:absolute; top:6px; left:6px; display:flex; gap:6px}
+  .statusChips{position:absolute; top:24px; left:8px; display:flex; gap:6px; z-index:3}
   .chip{font-size:11px; padding:3px 6px; border-radius:8px; border:2px solid #4a356c; background:#1b1328bb}
   .chip.green{border-color:#3b7f5f; color:#9be0be}
   .chip.red{border-color:#7f3b4a; color:#ff9cab}
   .chip.gold{border-color:#6b4e10; color:#ffd966}
-  .nameplate{position:absolute; top:-14px; left:8px; right:8px; font-family:"Press Start 2P"; font-size:11px; color:var(--amber); text-align:center}
 
-  .ui{
-    display:grid; grid-template-columns: 2fr 1fr; gap:10px;
+  /* Bars pinned at bottom with high z-index so they never hide */
+  .barWrap{ position:absolute; left:8px; right:8px; bottom:8px; display:grid; gap:6px; z-index:3 }
+  .bar{height:14px; border:2px solid #4a356c; background:#150f23; border-radius:8px; overflow:hidden; position:relative}
+  .hp{--c:#ff5868} .mp{--c:#63d297} .atb{--c:#ffd966}
+  .fill{height:100%; width:0%; background:linear-gradient(90deg, var(--c), #ffffff40)}
+  .barLabel{position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:13px; color:#e9e5d0cc; text-shadow:2px 2px 0 #000}
+
+  /* popups */
+  .popup{
+    position:absolute; left:50%; top:40%; transform:translate(-50%,-50%);
+    font-size:18px; padding:2px 6px; border-radius:8px; pointer-events:none; white-space:nowrap;
+    animation: pop 700ms ease-out forwards; text-shadow:2px 2px 0 #000; z-index:4;
   }
-  .log{border:3px solid #4a356c; border-radius:12px; padding:10px; min-height:96px; background:#110a1b; overflow:auto; font-size:16px}
+  @keyframes pop{
+    0%{ opacity:0; transform:translate(-50%,-10px) scale(0.9); }
+    15%{ opacity:1; transform:translate(-50%,-18px) scale(1.05); }
+    100%{ opacity:0; transform:translate(-50%,-46px) scale(1.0); }
+  }
+
+  /* magic auras & shield */
+  .aura{
+    position:absolute; inset:0; border-radius:12px; pointer-events:none; opacity:0; z-index:2;
+    animation: aura 420ms ease-out forwards;
+  }
+  @keyframes aura{ 0%{opacity:0} 30%{opacity:.9} 100%{opacity:0} }
+  .shield{
+    position:absolute; inset:0; display:flex; align-items:center; justify-content:center; pointer-events:none; opacity:0; z-index:2;
+    animation: shield 500ms ease-out forwards; text-shadow:2px 2px 0 #000;
+  }
+  @keyframes shield{ 0%{opacity:0; transform:scale(.8)} 40%{opacity:1; transform:scale(1.0)} 100%{opacity:0; transform:scale(1.1)} }
+
+  /* UI: controls LEFT, log RIGHT */
+  .ui{ display:grid; grid-template-columns: 1fr 2fr; gap:10px; }
   .actions{border:3px solid #4a356c; border-radius:12px; padding:10px; background:#110a1b; display:grid; gap:8px}
   .row{display:flex; gap:8px; flex-wrap:wrap}
   .spellList{display:flex; gap:8px; flex-wrap:wrap}
-  .btn.small{font-size:11px; padding:8px 10px}
-  .btn.alt{border-color:#6b4e10}
-  .btn.disabled{opacity:.5; pointer-events:none}
   .tip{opacity:.85; font-size:16px}
+  .log{border:3px solid #4a356c; border-radius:12px; padding:10px; min-height:128px; background:#110a1b; overflow:auto; font-size:16px}
 
   .overlay{
     position:absolute; inset:0; display:none; align-items:center; justify-content:center; background:rgba(0,0,0,.65); z-index:20;
@@ -89,7 +126,7 @@
 <body>
 <div class="wrap">
   <header>
-    <div class="title">THE DUNGEON BELOW — Combat</div>
+    <div class="title">THE DUNGEON BELOW — Combat+</div>
     <div>
       <button id="newBattle" class="btn">Start Battle</button>
       <button id="regenerate" class="btn alt">New Enemies</button>
@@ -126,23 +163,24 @@
     </div>
 
     <div class="ui">
-      <div class="log" id="log" aria-live="polite"></div>
+      <!-- Controls LEFT -->
       <div class="actions">
         <div class="row">
           <button id="actAttack" class="btn small">Attack</button>
           <button id="actDefend" class="btn small">Defend</button>
           <button id="actMagic" class="btn small">Magic</button>
-          <span id="turnHint" class="tip"></span>
         </div>
         <div id="spells" class="spellList"></div>
-        <div class="tip">Tip: Timers fill faster with higher <b>Agility</b>. Slime’s <b>Goop Spray</b> slows timers.</div>
+        <div class="tip" id="turnHint">Tip: Timers fill faster with higher <b>Agility</b>. Slime’s <b>Goop Spray</b> slows timers.</div>
       </div>
+      <!-- Log RIGHT -->
+      <div class="log" id="log" aria-live="polite"></div>
     </div>
   </div>
 </div>
 
 <script>
-/* ====== tiny bleeps ====== */
+/* ===== bleeps ===== */
 const SFX = {
   bleep(freq=660, dur=0.05){ try{
     const ctx = new (window.AudioContext||window.webkitAudioContext)();
@@ -154,7 +192,7 @@ const SFX = {
   }catch(e){} }
 };
 
-/* ====== portrait sprites for log/side (hero only) ====== */
+/* ===== simple pixel portrait for hero ===== */
 function drawPixelSprite(canvas, map, palette, scale=6){
   const ctx = canvas.getContext('2d');
   const size = map.length; canvas.width=size*scale; canvas.height=size*scale;
@@ -193,7 +231,7 @@ const MAPS = {
   ]
 };
 
-/* ====== hero load ====== */
+/* ===== hero + inventory ===== */
 function loadHero(){
   const fallback = { key:'warrior', name:'Adventurer', class:'Wanderer',
     stats:{Health:8, Attack:4, Defense:4, Magic:2, Agility:2}, xp:0, level:1
@@ -206,20 +244,17 @@ function loadHero(){
   }catch(e){ return fallback; }
 }
 const HERO = loadHero();
-
-/* ====== inventory ====== */
 const Inventory = {
   load(){ try{ return JSON.parse(localStorage.getItem('inventory_v1')) || {gold:0, items:[]} }catch(e){ return {gold:0, items:[]} } },
   save(d){ localStorage.setItem('inventory_v1', JSON.stringify(d)); }
 };
 const INV = Inventory.load();
 
-/* ====== combat system ====== */
+/* ===== combat ===== */
 const Combat = (function(){
-  const BASE_INTERVAL = 3.0; // seconds per turn before agility & debuffs
+  const BASE_INTERVAL = 3.0;
   const SLIME_COLORS = ["#7eea7a", "#64d462", "#4fbd4d"];
 
-  const arena = document.getElementById('arena');
   const logEl = document.getElementById('log');
   const overlay = document.getElementById('overlay');
   const ovTitle = document.getElementById('ovTitle');
@@ -236,10 +271,10 @@ const Combat = (function(){
 
   const state = {
     allies: [], enemies: [],
-    actorMenu: null, // current player-unit awaiting input
+    actorMenu: null,
   };
 
-  /* ---- helpers ---- */
+  /* utils */
   function qs(sel){ return document.querySelector(sel); }
   function clamp(v,a,b){ return Math.max(a, Math.min(b, v)); }
   function rnd(a,b){ return a + Math.random()*(b-a); }
@@ -275,95 +310,25 @@ const Combat = (function(){
     const atk = (isHelper ? 4 : 6) + A*2;
     const def = 2 + D*2;
     const mag = 6 + M*3;
-    const agi = 1 + G*0.12; // multiplier
+    const agi = 1 + G*0.12;
     return {maxHP:hpm, maxMP:mp, atk, def, mag, agi};
   }
-
-  function intervalSeconds(unit){
-    // faster with agility, slower if gooped
-    const speed = 1.0 * unit.stats.agi * (unit.goopMult || 1.0); // goopMult >1 means slower
-    return BASE_INTERVAL / speed;
-  }
-
+  function intervalSeconds(u){ return BASE_INTERVAL / (u.stats.agi * (u.goopMult || 1.0)); }
   function damageRoll(base, targetDef){ return Math.max(1, Math.floor(base * rnd(0.9,1.1) - targetDef*0.6)); }
 
-  /* ---- entities ---- */
-  function mkAllyFromHero(slotIndex){
-    const t = tiles.allies[slotIndex];
-    const tile = setupTile(t);
-    const stats = coreStatsFromSheet(HERO,false);
-    const u = {
-      id:'hero', side:'ally', name:HERO.name || 'Hero', slot:slotIndex, tile, stats,
-      hp:stats.maxHP, mp:stats.maxMP,
-      ready: false, tAccum: rnd(0, intervalSeconds({stats})*0.8),
-      guarding:false, goopMult:1.0, goopTime:0,
-      canCast:true, isHelper:false, dead:false,
-      sprite: drawHeroSprite(tile.canvas),
-      spells: [
-        {id:'bolt', name:'Lightning Bolt', cost:20, aoe:false, desc:'Zaps a foe.'},
-        {id:'inferno', name:'Inferno', cost:40, aoe:true, desc:'Burn all enemies.'},
-        {id:'summon', name:'Summon', cost:50, aoe:false, desc:'Call a helper.'},
-      ]
-    };
-    tile.ui.name.textContent = `${u.name} (Lv ${HERO.level||1})`;
-    updateBars(u);
-    return u;
-  }
-
-  function mkHelper(slotIndex){
-    const t = tiles.allies[slotIndex];
-    const tile = setupTile(t);
-    const base = coreStatsFromSheet(HERO,true);
-    const u = {
-      id:'helper-'+Date.now(), side:'ally', name:'Summoned', slot:slotIndex, tile, stats:base,
-      hp:base.maxHP, mp:0,
-      ready:false, tAccum:rnd(0, intervalSeconds({stats:base})*0.6),
-      guarding:false, goopMult:1.0, goopTime:0,
-      canCast:false, isHelper:true, dead:false,
-      sprite: drawHelperSprite(tile.canvas),
-      spells:[]
-    };
-    tile.ui.name.textContent = `Helper`;
-    updateBars(u);
-    return u;
-  }
-
-  function mkSlime(slotIndex, n){
-    const t = tiles.enemies[slotIndex];
-    const tile = setupTile(t);
-    const lvl = clamp((HERO.level||1),1,99);
-    const hp = 45 + lvl*6 + irand(0,6);
-    const mp = 30 + lvl*4;
-    const u = {
-      id:'slime-'+n, side:'enemy', name:'Slime', slot:slotIndex, tile,
-      stats:{maxHP:hp, maxMP:mp, atk:8+lvl*1.2, def:3+lvl*0.8, mag:6+lvl, agi:1+0.1+0.04*lvl},
-      hp, mp,
-      ready:false, tAccum:rnd(0, intervalSeconds({stats:{agi:1+0.04*lvl}})*0.9),
-      guarding:false, goopMult:1.0, goopTime:0,
-      dead:false,
-      sprite: drawSlime(tile.canvas, SLIME_COLORS[n%SLIME_COLORS.length]),
-      spells:[{id:'goop', name:'Goop Spray', cost:12}]
-    };
-    tile.ui.name.textContent = `Slime`;
-    updateBars(u);
-    return u;
-  }
-
+  /* entities */
   function setupTile(tile){
     tile.innerHTML='';
     const unit = el('div','unit'); tile.appendChild(unit);
     const cvs = document.createElement('canvas'); cvs.width=96; cvs.height=96; cvs.className='sprite'; unit.appendChild(cvs);
     const ui = makeBars(tile);
-    return {canvas:cvs, ui};
+    return {canvas:cvs, ui, unitDiv:unit, host:tile};
   }
-
   function drawHeroSprite(canvas){
     const key = (HERO.key && MAPS[HERO.key]) ? HERO.key : 'warrior';
     drawPixelSprite(canvas, MAPS[key], PALETTES[key], 6);
-    return key;
   }
   function drawHelperSprite(canvas){
-    // simple blue wisp
     const ctx = canvas.getContext('2d'); ctx.clearRect(0,0,96,96);
     ctx.fillStyle = "#6de2f8"; for(let i=0;i<6;i++){ ctx.beginPath(); ctx.arc(48, 60-i*8, 12-i, 0, Math.PI*2); ctx.fill(); }
   }
@@ -371,12 +336,82 @@ const Combat = (function(){
     const ctx = canvas.getContext('2d'); ctx.clearRect(0,0,96,96);
     ctx.fillStyle = color; ctx.fillRect(20,48,56,24);
     ctx.beginPath(); ctx.moveTo(20,48); ctx.bezierCurveTo(24,32,72,32,76,48); ctx.lineTo(76,72); ctx.lineTo(20,72); ctx.closePath(); ctx.fill();
-    ctx.fillStyle = "#120a1b"; ctx.fillRect(36,50,8,6); ctx.fillRect(56,50,8,6); // eyes
-    ctx.fillRect(44,62,8,3); // mouth
-    return 'slime';
+    ctx.fillStyle = "#120a1b"; ctx.fillRect(36,50,8,6); ctx.fillRect(56,50,8,6); ctx.fillRect(44,62,8,3);
   }
 
-  /* ---- UI updates ---- */
+  function mkAllyFromHero(slotIndex){
+    const t = tiles.allies[slotIndex];
+    const tile = setupTile(t);
+    const stats = coreStatsFromSheet(HERO,false);
+    const u = {
+      id:'hero', side:'ally', name:HERO.name || 'Hero', slot:slotIndex, tile, stats,
+      hp:stats.maxHP, mp:stats.maxMP,
+      ready:false, acting:false, tAccum: rnd(0, intervalSeconds({stats})*0.8),
+      guarding:false, goopMult:1.0, goopTime:0,
+      canCast:true, isHelper:false, dead:false,
+      spells: [
+        {id:'bolt', name:'Lightning Bolt', cost:20},
+        {id:'inferno', name:'Inferno', cost:40},
+        {id:'summon', name:'Summon', cost:50},
+      ]
+    };
+    drawHeroSprite(tile.canvas);
+    tile.ui.name.textContent = `${u.name} (Lv ${HERO.level||1})`;
+    updateBars(u);
+    return u;
+  }
+  function mkHelper(slotIndex){
+    const t = tiles.allies[slotIndex];
+    const tile = setupTile(t);
+    const base = coreStatsFromSheet(HERO,true);
+    const u = {
+      id:'helper-'+Date.now(), side:'ally', name:'Helper', slot:slotIndex, tile, stats:base,
+      hp:base.maxHP, mp:0,
+      ready:false, acting:false, tAccum:rnd(0, intervalSeconds({stats:base})*0.6),
+      guarding:false, goopMult:1.0, goopTime:0,
+      canCast:false, isHelper:true, dead:false, spells:[]
+    };
+    drawHelperSprite(tile.canvas);
+    tile.ui.name.textContent = `Helper`;
+    updateBars(u);
+    return u;
+  }
+  function mkSlime(slotIndex, n){
+    const t = tiles.enemies[slotIndex];
+    const tile = setupTile(t);
+    const lvl = Math.max(1, HERO.level||1);
+    const hp = 45 + lvl*6 + irand(0,6);
+    const mp = 30 + lvl*4;
+    const u = {
+      id:'slime-'+n, side:'enemy', name:'Slime', slot:slotIndex, tile,
+      stats:{maxHP:hp, maxMP:mp, atk:8+lvl*1.2, def:3+lvl*0.8, mag:6+lvl, agi:1+0.1+0.04*lvl},
+      hp, mp,
+      ready:false, acting:false, tAccum:rnd(0, intervalSeconds({stats:{agi:1+0.04*lvl}})*0.9),
+      guarding:false, goopMult:1.0, goopTime:0,
+      dead:false, spells:[{id:'goop', name:'Goop Spray', cost:12}]
+    };
+    drawSlime(tile.canvas, SLIME_COLORS[n%SLIME_COLORS.length]);
+    tile.ui.name.textContent = `Slime`;
+    updateBars(u);
+    return u;
+  }
+
+  /* UI helpers */
+  function setActive(u, on){ if(u) u.tile.host.classList.toggle('active', !!on); }
+  function spawnPopup(tile, text, color="#ffd966"){
+    const p = el('div','popup'); p.style.color = color; p.textContent = text;
+    tile.host.appendChild(p); setTimeout(()=>p.remove(), 720);
+  }
+  function aura(tile, color){
+    const a = el('div','aura'); a.style.boxShadow = `0 0 24px 6px ${color} inset, 0 0 24px 6px ${color}`;
+    a.style.background = `${color}22`; tile.host.appendChild(a); setTimeout(()=>a.remove(), 450);
+  }
+  function shieldFlash(tile){
+    const s = el('div','shield'); s.style.fontSize='36px'; s.textContent='🛡';
+    tile.host.appendChild(s); setTimeout(()=>s.remove(), 520);
+  }
+
+  /* updates */
   function updateBars(u){
     const hpP = Math.round(100 * u.hp / u.stats.maxHP);
     const mpP = Math.round(100 * (u.mp||0) / (u.stats.maxMP||1));
@@ -391,124 +426,144 @@ const Combat = (function(){
 
     u.tile.ui.bars.atb.style.width = atbP+'%';
     u.tile.ui.bars.atbLbl.textContent = u.ready ? 'READY' : `${(itv - u.tAccum).toFixed(1)}s`;
-    // chips
+
     const chips = u.tile.ui.chips; chips.innerHTML='';
     if(u.guarding) chips.appendChild(chip('Guard','green'));
-    if(u.goopTime>0) chips.appendChild(chip('Gooped','red'));
+    if(u.goopTime>0) chips.appendChild(chip(`Gooped ${u.goopTime.toFixed(1)}s`,'red'));
   }
   function chip(text, color){ const c = el('div','chip '+color); c.textContent = text; return c; }
 
-  function placeAllies(){
-    state.allies = [null,null,null];
-    // hero in middle
-    state.allies[1] = mkAllyFromHero(1);
-  }
-
-  function firstFreeAllySlot(){
-    for(let i of [0,2]) if(!state.allies[i] || state.allies[i].dead) return i;
-    return null;
-  }
-
+  function placeAllies(){ state.allies = [null,null,null]; state.allies[1] = mkAllyFromHero(1); }
+  function firstFreeAllySlot(){ for(let i of [0,2]) if(!state.allies[i] || state.allies[i].dead) return i; return null; }
   function placeEnemies(count){
     state.enemies = [null,null,null];
-    const slots = [0,1,2]; // try center bias when multiple
     const order = (count===1)?[1]: (count===2? [0,2] : [0,1,2]);
     order.forEach((slot,i)=> state.enemies[slot] = mkSlime(slot,i));
   }
 
-  /* ---- actions ---- */
+  /* animations + actions */
+  function lunge(attacker, direction){
+    return new Promise(res=>{
+      const u = attacker.tile.unitDiv;
+      u.style.transition = 'transform .12s ease';
+      u.style.transform = `translateX(${direction*18}px)`;
+      setTimeout(()=>{ u.style.transform = `translateX(0px)`; setTimeout(res, 130); }, 140);
+    });
+  }
+
   function doAttack(attacker, target){
-    const pwr = attacker.stats.atk;
-    let dmg = damageRoll(pwr, target.stats.def);
-    if(target.guarding){ dmg = Math.floor(dmg*0.5); target.guarding=false; }
-    target.hp = clamp(target.hp - dmg, 0, target.stats.maxHP);
-    log(`<span style="color:${attacker.side==='ally'?'#63d297':'#ff5868'}">${attacker.name}</span> attacks ${target.name} for <b>${dmg}</b>.`);
-    SFX.bleep(700);
-    afterAction(attacker);
-    checkDeaths();
+    setActive(attacker, true);
+    const dir = attacker.side==='ally' ? +1 : -1;
+    lunge(attacker, dir).then(()=>{
+      let dmg = damageRoll(attacker.stats.atk, target.stats.def);
+      if(target.guarding){ dmg = Math.floor(dmg*0.5); target.guarding=false; }
+      target.hp = clamp(target.hp - dmg, 0, target.stats.maxHP);
+      spawnPopup(target.tile, `-${dmg}`, '#ff9cab');
+      log(`<span style="color:${attacker.side==='ally'?'#63d297':'#ff5868'}">${attacker.name}</span> attacks ${target.name} for <b>${dmg}</b>.`);
+      SFX.bleep(700);
+      afterAction(attacker); checkDeaths(); setActive(attacker,false);
+    });
   }
   function doDefend(u){
-    u.guarding = true;
-    log(`${u.name} braces for impact.`);
-    SFX.bleep(520);
+    u.guarding = true; shieldFlash(u.tile);
+    log(`${u.name} braces for impact.`); SFX.bleep(520);
     afterAction(u);
   }
   function doBolt(caster, target){
-    const cost=20; if((caster.mp||0)<cost){ log(`Not enough MP.`); return false; }
-    caster.mp -= cost;
-    let dmg = Math.floor(caster.stats.mag*1.6 + rnd(6,10)) - Math.floor(target.stats.def*0.4);
-    if(target.guarding){ dmg=Math.floor(dmg*0.5); target.guarding=false; }
-    dmg = Math.max(1,dmg);
-    target.hp = clamp(target.hp - dmg, 0, target.stats.maxHP);
-    log(`${caster.name} casts <b>Lightning Bolt</b> on ${target.name} for <b>${dmg}</b>. ⚡`);
-    SFX.bleep(880);
-    afterAction(caster);
-    checkDeaths();
+    if((caster.mp||0)<20){ log(`Not enough MP.`); return false; }
+    caster.mp -= 20; aura(caster.tile, '#ffd84a');
+    setTimeout(()=>{
+      let dmg = Math.floor(caster.stats.mag*1.6 + rnd(6,10)) - Math.floor(target.stats.def*0.4);
+      if(target.guarding){ dmg=Math.floor(dmg*0.5); target.guarding=false; }
+      dmg = Math.max(1,dmg); target.hp = clamp(target.hp - dmg, 0, target.stats.maxHP);
+      spawnPopup(target.tile, `⚡ ${dmg}`, '#ffe066');
+      log(`${caster.name} casts <b>Lightning Bolt</b> on ${target.name}.`); SFX.bleep(880);
+      afterAction(caster); 
+    }, 200);
     return true;
   }
   function doInferno(caster, targets){
-    const cost=40; if((caster.mp||0)<cost){ log(`Not enough MP.`); return false; }
-    caster.mp -= cost;
-    targets.forEach(t=>{
-      let dmg = Math.floor(caster.stats.mag*1.2 + rnd(4,8)) - Math.floor(t.stats.def*0.35);
-      if(t.guarding){ dmg=Math.floor(dmg*0.5); t.guarding=false; }
-      t.hp = clamp(t.hp - Math.max(1,dmg), 0, t.stats.maxHP);
-    });
-    log(`${caster.name} unleashes <b>Inferno</b> on all foes! 🔥`);
-    SFX.bleep(940);
-    afterAction(caster);
-    checkDeaths();
+    if((caster.mp||0)<40){ log(`Not enough MP.`); return false; }
+    caster.mp -= 40; aura(caster.tile, '#ff5a5a');
+    setTimeout(()=>{
+      targets.forEach(t=>{
+        if(!t || t.dead) return;
+        let dmg = Math.floor(caster.stats.mag*1.2 + rnd(4,8)) - Math.floor(t.stats.def*0.35);
+        if(t.guarding){ dmg=Math.floor(dmg*0.5); t.guarding=false; }
+        t.hp = clamp(t.hp - Math.max(1,dmg), 0, t.stats.maxHP);
+        spawnPopup(t.tile, `🔥 ${Math.max(1,dmg)}`, '#ffd3b3');
+      });
+      log(`${caster.name} unleashes <b>Inferno</b>!`); SFX.bleep(940);
+      afterAction(caster); 
+    }, 200);
     return true;
   }
   function doSummon(caster){
-    const cost=50; if((caster.mp||0)<cost){ log(`Not enough MP.`); return false; }
+    if((caster.mp||0)<50){ log(`Not enough MP.`); return false; }
     const slot = firstFreeAllySlot(); if(slot==null){ log(`No space to summon.`); return false; }
-    caster.mp -= cost;
-    const helper = mkHelper(slot);
-    state.allies[slot] = helper;
-    log(`${caster.name} summons a helper! ✨`);
-    SFX.bleep(840);
-    afterAction(caster);
+    caster.mp -= 50; aura(caster.tile, '#67d8ff');
+    setTimeout(()=>{
+      const helper = mkHelper(slot); state.allies[slot] = helper;
+      spawnPopup(helper.tile, `+Helper`, '#9be0ff'); log(`${caster.name} summons a helper!`); SFX.bleep(840);
+      afterAction(caster);
+    }, 200);
     return true;
   }
   function doGoop(attacker, target){
-    const cost=12; if(attacker.mp >= cost){ attacker.mp -= cost; }
-    const base = Math.floor(attacker.stats.mag*0.6 + rnd(2,4));
-    let dmg = base - Math.floor(target.stats.def*0.3);
-    if(target.guarding){ dmg=Math.floor(dmg*0.5); target.guarding=false; }
-    dmg = Math.max(1,dmg);
-    target.hp = clamp(target.hp - dmg, 0, target.stats.maxHP);
-    // slow: increase goop multiplier for 6s
-    target.goopMult = (target.goopMult||1)*0.8; // smaller speed -> slower (we'll invert in interval)
-    target.goopTime = 6.0;
-    log(`Slime splatters <b>Goop Spray</b> on ${target.name} for <b>${dmg}</b>. 🧪 Their timer slows!`);
-    SFX.bleep(600);
-    afterAction(attacker);
-    checkDeaths();
+    if(attacker.mp >= 12){ attacker.mp -= 12; } aura(attacker.tile, '#78e07a');
+    setTimeout(()=>{
+      const base = Math.floor(attacker.stats.mag*0.6 + rnd(2,4));
+      let dmg = base - Math.floor(target.stats.def*0.3);
+      if(target.guarding){ dmg=Math.floor(dmg*0.5); target.guarding=false; }
+      dmg = Math.max(1,dmg); target.hp = clamp(target.hp - dmg, 0, target.stats.maxHP);
+      target.goopMult = (target.goopMult||1)*0.8; target.goopTime = 6.0;
+      spawnPopup(target.tile, `🧪 ${dmg}`, '#9be0be');
+      log(`Slime uses <b>Goop Spray</b> — ${target.name} is slowed.`); SFX.bleep(600);
+      afterAction(attacker); 
+    }, 200);
   }
 
   function afterAction(u){
-    u.tAccum = 0; u.ready=false;
+    u.tAccum = 0; u.ready = false; u.acting = false; // unlock for future rounds
     updateBars(u);
   }
 
   function randomLiving(units){ const alive = units.filter(x=>x && !x.dead && x.hp>0); return alive.length? alive[irand(0,alive.length-1)] : null; }
 
   function enemyAI(u){
-    // choose between attack/defend/goop
-    const roll = Math.random();
-    const target = randomLiving(state.allies);
-    if(!target){ return; }
-    if(u.mp>=12 && roll<0.35){
-      doGoop(u, target);
-    }else if(roll<0.15){
-      doDefend(u);
-    }else{
-      doAttack(u, target);
-    }
+    // locked the turn already before calling
+    setActive(u, true);
+    const roll = Math.random(); const target = randomLiving(state.allies); if(!target){ setActive(u,false); return; }
+    if(u.mp>=12 && roll<0.35){ doGoop(u, target); }
+    else if(roll<0.15){ doDefend(u); setActive(u,false); }
+    else{ doAttack(u, target); /* active cleared in doAttack */ }
   }
 
-  /* ---- ticking ---- */
+function markKOs(){
+  [...state.allies, ...state.enemies].forEach(u=>{
+    if(!u) return;
+    if(u.hp <= 0 && !u.dead){
+      u.dead = true;
+      u.guarding = false;
+      u.acting = false;
+      if (u.tile && u.tile.ui) u.tile.ui.name.textContent += ' [KO]';
+    }
+  });
+}
+
+function checkEnd(){
+  if(!running) return;
+  const hero = state.allies[1];
+  if(!hero || hero.hp <= 0){ endBattle(false); return; }
+  const anyEnemyAlive = state.enemies.some(u => u && u.hp > 0 && !u.dead);
+  if(!anyEnemyAlive){ endBattle(true); }
+}
+
+
+  /* ticker */
+  const btnAttack = qs('#actAttack'), btnDefend = qs('#actDefend'), btnMagic = qs('#actMagic');
+  const spellsWrap = qs('#spells'), turnHint = qs('#turnHint');
+
   function tick(ts){
     if(!running || paused){ lastTS=ts; requestAnimationFrame(tick); return; }
     if(lastTS==null) lastTS=ts;
@@ -516,89 +571,112 @@ const Combat = (function(){
 
     [...state.allies, ...state.enemies].forEach(u=>{
       if(!u || u.dead) return;
-      // status timers
       if(u.goopTime>0){ u.goopTime -= dt; if(u.goopTime<=0){ u.goopTime=0; u.goopMult=1.0; } }
-      // atb
       const itv = intervalSeconds(u);
-      if(!u.ready){
-        u.tAccum += dt;
-        if(u.tAccum >= itv){ u.ready=true; }
-      }
+      if(!u.ready && !u.acting){ u.tAccum += dt; if(u.tAccum >= itv){ u.ready=true; } }
       updateBars(u);
     });
 
-    // handle turns
+function tick(ts){
+  if(!running || paused){ lastTS=ts; requestAnimationFrame(tick); return; }
+  if(lastTS==null) lastTS=ts;
+  let dt = Math.min(0.05, (ts-lastTS)/1000); lastTS=ts;
+
+  // progress statuses & ATB
+  [...state.allies, ...state.enemies].forEach(u=>{
+    if(!u || u.dead) return;
+    if(u.goopTime>0){ u.goopTime -= dt; if(u.goopTime<=0){ u.goopTime=0; u.goopMult=1.0; } }
+    const itv = intervalSeconds(u);
+    if(!u.ready && !u.acting){
+      u.tAccum += dt;
+      if(u.tAccum >= itv){ u.ready = true; }
+    }
+    updateBars(u);
+  });
+
+  // NEW: always mark KOs & check victory/defeat
+  markKOs();
+  checkEnd();
+  if(!running){ return; } // endBattle() may have flipped this
+
+  if(!state.actorMenu){
+    // Only units that are ready, not acting, not dead, and have HP > 0
+    const enemyReady = state.enemies.find(u=>u && u.ready && !u.acting && !u.dead && u.hp>0);
+    if(enemyReady){
+      enemyReady.ready = false; enemyReady.acting = true;
+      enemyAI(enemyReady);
+    }else{
+      const allyReady = state.allies.find(u=>u && u.ready && !u.acting && !u.dead && u.hp>0);
+      if(allyReady){
+        allyReady.ready = false; allyReady.acting = true;
+        openMenu(allyReady);
+      }
+    }
+  }
+
+  requestAnimationFrame(tick);
+}
+
     if(!state.actorMenu){
-      // resolve all enemy ready first (simultaneous readiness -> enemies act first for snappier feel)
-      const enemyReady = state.enemies.find(u=>u && u.ready && !u.dead);
-      if(enemyReady){ enemyAI(enemyReady); }
-      else{
-        const allyReady = state.allies.find(u=>u && u.ready && !u.dead);
+      // enemies act first on ties; only pick units that are ready AND not already acting
+      const enemyReady = state.enemies.find(u=>u && u.ready && !u.acting && !u.dead);
+      if(enemyReady){
+        // lock this turn immediately to prevent multiple triggers
+        enemyReady.ready = false; enemyReady.acting = true;
+        enemyAI(enemyReady);
+      }else{
+        const allyReady = state.allies.find(u=>u && u.ready && !u.acting && !u.dead);
         if(allyReady){
+          allyReady.ready = false; allyReady.acting = true;
           openMenu(allyReady);
         }
       }
     }
 
-    // victory / defeat checks are also run post action
     requestAnimationFrame(tick);
   }
 
-  function checkDeaths(){
-    state.allies.forEach(u=>{ if(u && u.hp<=0 && !u.dead){ u.dead=true; u.tile.ui.name.textContent += ' [KO]'; } });
-    state.enemies.forEach(u=>{ if(u && u.hp<=0 && !u.dead){ u.dead=true; u.tile.ui.name.textContent += ' [KO]'; } });
-
-    const hero = state.allies[1];
-    if(hero && hero.hp<=0){
-      endBattle(false);
-      return;
-    }
-    const anyEnemyAlive = state.enemies.some(u=>u && !u.dead && u.hp>0);
-    if(!anyEnemyAlive){
-      endBattle(true);
-    }
-  }
-
-  /* ---- player menu ---- */
-  const btnAttack = qs('#actAttack'), btnDefend = qs('#actDefend'), btnMagic = qs('#actMagic');
-  const spellsWrap = qs('#spells'), turnHint = qs('#turnHint');
-
+  /* player menu */
   function openMenu(u){
-    paused = true; state.actorMenu = u;
+    paused = true; state.actorMenu = u; setActive(u, true);
     turnHint.textContent = `Your turn: ${u.name}`;
     spellsWrap.innerHTML='';
-    const canAct = (v)=> !v || !v.dead;
+    btnAttack.classList.remove('disabled'); btnDefend.classList.remove('disabled'); btnMagic.classList.remove('disabled');
 
-    // wire buttons
     btnAttack.onclick = ()=>{
-      const tgt = targetSelect(u.side==='ally' ? state.enemies : state.allies, 'Choose a target for Attack');
-      tgt.then(target=>{
-        if(!target) { resume(); return; }
-        doAttack(u, target); resume();
+      targetSelect(state.enemies, 'Choose a target for Attack').then(target=>{
+        if(!target){ cancelTurn(u); return; }
+        doAttack(u, target); resume(true);
       });
     };
-    btnDefend.onclick = ()=>{ doDefend(u); resume(); };
+    btnDefend.onclick = ()=>{ doDefend(u); resume(true); };
     btnMagic.onclick = ()=>{
-      // list spells for caster (hero only has 3; helper has none)
       spellsWrap.innerHTML='';
       (u.spells||[]).forEach(sp=>{
         const b = el('button','btn small'); b.textContent = `${sp.name} (${sp.cost} MP)`;
         if((u.mp||0)<sp.cost) b.classList.add('disabled');
         b.onclick = ()=>{
           if(sp.id==='bolt'){
-            targetSelect(state.enemies,'Choose a target for Lightning').then(t=>{ if(!t){resume();return;} if(doBolt(u,t)) resume(); });
+            targetSelect(state.enemies,'Choose a target for Lightning').then(t=>{ if(!t){ cancelTurn(u); return; } if(doBolt(u,t)) resume(true); });
           }else if(sp.id==='inferno'){
-            if(doInferno(u, state.enemies.filter(x=>x && !x.dead))) resume();
+            if(doInferno(u, state.enemies.filter(x=>x && !x.dead))) resume(true);
           }else if(sp.id==='summon'){
-            if(doSummon(u)) resume();
+            if(doSummon(u)) resume(true);
           }
         };
         spellsWrap.appendChild(b);
       });
     };
   }
-  function resume(){
+  function cancelTurn(u){
+    // user aborted targeting: give the turn back without resetting timer progress
+    u.ready = true; u.acting = false; setActive(u,false);
     spellsWrap.innerHTML=''; turnHint.textContent='';
+    state.actorMenu = null; paused=false;
+  }
+  function resume(clearGlow=false){
+    spellsWrap.innerHTML=''; turnHint.textContent='';
+    if(clearGlow && state.actorMenu) setActive(state.actorMenu,false);
     state.actorMenu = null; paused=false;
   }
 
@@ -616,79 +694,53 @@ const Combat = (function(){
         clickable.push(high);
       });
       function cleanup(){ clickable.forEach(h=>h.remove()); }
-      // cancel if user clicks elsewhere
       const abort = (e)=>{ if(!clickable.some(h=>h.contains(e.target))){ cleanup(); resolve(null); document.removeEventListener('click', abort, true); } };
       setTimeout(()=>document.addEventListener('click', abort, true),0);
     });
   }
 
-  /* ---- lifecycle ---- */
+  /* lifecycle */
   function newBattle(){
-    // reset UI
-    logEl.innerHTML='';
-    document.querySelectorAll('.tile').forEach(t=> t.innerHTML='');
-    overlay.style.display='none';
-
-    placeAllies();
-    placeEnemies(irand(1,3));
-    running=true; paused=false; lastTS=null;
-    requestAnimationFrame(tick);
-    log(`<b>Battle started!</b>`);
-    SFX.bleep(760);
+    logEl.innerHTML=''; document.querySelectorAll('.tile').forEach(t=> t.innerHTML=''); overlay.style.display='none';
+    placeAllies(); placeEnemies(irand(1,3));
+    running=true; paused=false; lastTS=null; requestAnimationFrame(tick);
+    log(`<b>Battle started!</b>`); SFX.bleep(760);
   }
-
   function regenerateEnemies(){
-    // keep allies, refresh enemies
-    document.querySelectorAll('[data-slot^="enemy"]').forEach(t=>t.innerHTML='');
-    placeEnemies(irand(1,3));
+    document.querySelectorAll('[data-slot^="enemy"]').forEach(t=>t.innerHTML=''); placeEnemies(irand(1,3));
     log(`<i>New enemies approach…</i>`);
   }
-
   function endBattle(playerWon){
-    running=false; paused=true;
-    overlay.style.display='flex';
+    running=false; paused=true; overlay.style.display='flex';
     if(playerWon){
       const alive = state.enemies.filter(x=>x).length;
       const xpGain = 12 * alive + irand(0,6);
       ovTitle.textContent = "Victory!";
       ovText.textContent = `You gain ${xpGain} XP. The slimes leave some goo behind…`;
-      // loot
-      const loot = [];
-      const gold = irand(8,30); if(gold){ INV.gold += gold; loot.push(`${gold} gold`); }
+      const loot = []; const gold = irand(8,30); if(gold){ INV.gold += gold; loot.push(`${gold} gold`); }
       const itemsPool = ['Slime Goo','Sticky Resin','Green Core','Cracked Vial'];
       if(Math.random()<0.6){ const it = itemsPool[irand(0,itemsPool.length-1)]; INV.items.push(it); loot.push(it); }
-      Inventory.save(INV);
-      document.getElementById('ovDrops').textContent = loot.length? `Loot: ${loot.join(', ')}` : 'Loot: (none)';
-      // xp → stash on hero
-      try{
-        const stored = JSON.parse(localStorage.getItem('rpgCharacter')) || HERO;
-        stored.xp = (stored.xp||0) + xpGain;
-        localStorage.setItem('rpgCharacter', JSON.stringify(stored));
-      }catch(e){}
+      Inventory.save(INV); document.getElementById('ovDrops').textContent = loot.length? `Loot: ${loot.join(', ')}` : 'Loot: (none)';
+      try{ const stored = JSON.parse(localStorage.getItem('rpgCharacter')) || HERO; stored.xp = (stored.xp||0) + xpGain; localStorage.setItem('rpgCharacter', JSON.stringify(stored)); }catch(e){}
       SFX.bleep(880);
     }else{
-      ovTitle.textContent = "Game Over";
-      ovText.textContent = "You collapse as the dungeon fades to black…";
-      document.getElementById('ovDrops').textContent = '';
+      ovTitle.textContent = "Game Over"; ovText.textContent = "You collapse as the dungeon fades to black…"; document.getElementById('ovDrops').textContent='';
       SFX.bleep(300);
     }
-    ovBtn.onclick = ()=>{
-      overlay.style.display='none';
-      if(playerWon){ newBattle(); } else { // reset hero HP and restart
-        newBattle();
-      }
-    };
+    ovBtn.onclick = ()=>{ overlay.style.display='none'; newBattle(); };
   }
 
+  // export (optional)
   return { newBattle, regenerateEnemies };
 })();
 
-/* ====== wire controls ====== */
+/* controls */
 document.getElementById('newBattle').addEventListener('click', ()=>Combat.newBattle());
 document.getElementById('regenerate').addEventListener('click', ()=>Combat.regenerateEnemies());
 
-/* ====== little kick-off ====== */
+/* start */
 Combat.newBattle();
 </script>
 </body>
 </html>
+```
