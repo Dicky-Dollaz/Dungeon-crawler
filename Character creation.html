@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Character Creation</title>
+  <style>
+    body {
+      font-family: 'Arial', sans-serif;
+      background-color: #1b1b1b;
+      color: #f8f8f8;
+      text-align: center;
+    }
+    .container {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      flex-direction: column;
+    }
+    .carousel {
+      display: flex;
+      justify-content: center;
+      gap: 20px;
+    }
+    .carousel img {
+      width: 100px;
+      cursor: pointer;
+    }
+    .character-description {
+      margin-top: 20px;
+      font-size: 1.2em;
+      font-weight: bold;
+    }
+    .stats {
+      margin-top: 30px;
+      display: flex;
+      justify-content: center;
+      gap: 15px;
+      font-size: 1.2em;
+    }
+    .stat {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .stat input {
+      margin-top: 5px;
+      width: 50px;
+    }
+    .description {
+      font-style: italic;
+    }
+    .button {
+      background-color: #4CAF50;
+      color: white;
+      padding: 10px 20px;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      margin-top: 20px;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <h1>Character Creation</h1>
+
+    <!-- Carousel of character sprites -->
+    <div class="carousel">
+      <img src="paladin.png" alt="Paladin" id="paladin" onclick="selectCharacter('paladin')">
+      <img src="wizard.png" alt="Wizard" id="wizard" onclick="selectCharacter('wizard')">
+      <img src="assassin.png" alt="Assassin" id="assassin" onclick="selectCharacter('assassin')">
+      <img src="warrior.png" alt="Warrior" id="warrior" onclick="selectCharacter('warrior')">
+      <img src="nerd.png" alt="Nerd" id="nerd" onclick="selectCharacter('nerd')">
+    </div>
+
+    <div class="character-description" id="description">
+      <p>Select a character to begin!</p>
+    </div>
+
+    <!-- Character stats allocation -->
+    <div class="stats">
+      <div class="stat">
+        <p>Health</p>
+        <input type="number" id="health" value="10" min="1" max="20" onchange="updateStats()">
+      </div>
+      <div class="stat">
+        <p>Attack</p>
+        <input type="number" id="attack" value="10" min="1" max="20" onchange="updateStats()">
+      </div>
+      <div class="stat">
+        <p>Defense</p>
+        <input type="number" id="defense" value="10" min="1" max="20" onchange="updateStats()">
+      </div>
+      <div class="stat">
+        <p>Magic</p>
+        <input type="number" id="magic" value="10" min="1" max="20" onchange="updateStats()">
+      </div>
+      <div class="stat">
+        <p>Agility</p>
+        <input type="number" id="agility" value="10" min="1" max="20" onchange="updateStats()">
+      </div>
+    </div>
+
+    <!-- Confirmation button -->
+    <button class="button" onclick="confirmCharacter()">Confirm Character</button>
+  </div>
+
+  <script>
+    let selectedCharacter = null;
+    let remainingPoints = 20;
+
+    const descriptions = {
+      paladin: "The Human Paladin is a noble warrior who uses both sword and shield to protect the weak. Known for their honor and courage.",
+      wizard: "The Elf Wizard wields the arcane arts, casting powerful spells to defeat enemies from a distance. Their magic is unmatched.",
+      assassin: "The Half-Elf Assassin is stealthy and deadly, relying on agility and precision to eliminate foes without being detected.",
+      warrior: "The Dwarf Warrior is a sturdy tank, with a deep love for battle and a resistance to damage. His axe is his life.",
+      nerd: "The Human Nerd is far from conventional, but their knowledge of technology and strategy can prove more powerful than brute force."
+    };
+
+    const baseStats = {
+      paladin: { health: 10, attack: 7, defense: 8, magic: 4, agility: 1 },
+      wizard: { health: 7, attack: 4, defense: 4, magic: 10, agility: 5 },
+      assassin: { health: 8, attack: 8, defense: 4, magic: 3, agility: 7 },
+      warrior: { health: 12, attack: 6, defense: 9, magic: 2, agility: 3 },
+      nerd: { health: 9, attack: 5, defense: 4, magic: 5, agility: 7 }
+    };
+
+    function selectCharacter(character) {
+      selectedCharacter = character;
+      document.getElementById("description").innerHTML = `<p>${descriptions[character]}</p>`;
+      updateStats();
+    }
+
+    function updateStats() {
+      if (selectedCharacter) {
+        const stats = baseStats[selectedCharacter];
+        let totalAllocated = 0;
+        let statsInputs = ["health", "attack", "defense", "magic", "agility"];
+        
+        statsInputs.forEach(stat => {
+          totalAllocated += parseInt(document.getElementById(stat).value);
+        });
+
+        // Ensure total stats don't exceed 20 points
+        if (totalAllocated > 20) {
+          alert("You can only allocate a total of 20 points!");
+          return;
+        }
+
+        // Update the base stats after allocation
+        statsInputs.forEach(stat => {
+          const statValue = parseInt(document.getElementById(stat).value);
+          baseStats[selectedCharacter][stat] = statValue;
+        });
+      }
+    }
+
+    function confirmCharacter() {
+      if (selectedCharacter) {
+        alert(`You have selected the ${selectedCharacter} with the following stats:\n` +
+              `Health: ${baseStats[selectedCharacter].health}\n` +
+              `Attack: ${baseStats[selectedCharacter].attack}\n` +
+              `Defense: ${baseStats[selectedCharacter].defense}\n` +
+              `Magic: ${baseStats[selectedCharacter].magic}\n` +
+              `Agility: ${baseStats[selectedCharacter].agility}`);
+      } else {
+        alert("Please select a character first!");
+      }
+    }
+  </script>
+</body>
+</html>
