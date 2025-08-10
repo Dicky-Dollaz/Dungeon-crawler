@@ -213,6 +213,7 @@ function goCreator(selectHeroId=null){
   }, selectHeroId);
   mount('creator', api);
 }
+
 function goMap(fresh=false){
   App.mode='map';
   const api = MapScreen.mount(
@@ -226,6 +227,8 @@ function goMap(fresh=false){
       const count = 1 + Math.floor(Math.random()*3);
       goBattle({ enemies:'slime', count, sourceRoomId: room.id, seed: Math.floor(Math.random()*1e9) });
     },
+
+    
     ()=>{/* onDescend handled inside map */},
     ()=>{ // onSpendPoints
       openSpendPointsModal(App.hero, ()=>{
@@ -895,6 +898,62 @@ exitBtn.onclick = ()=>{
       return res.reverse();
     }
 
+    function serialize(){
+  // Flatten Maps/Sets so we can store safely
+  return {
+    level: S.level,
+    rooms: S.rooms.map(r => ({
+      id:r.id, x:r.x, y:r.y, w:r.w, h:r.h, cx:r.cx, cy:r.cy,
+      up:!!r.up, down:!!r.down, key:!!r.key, monster:!!r.monster, chest:!!r.chest
+    })),
+    edges: Array.from(S.adj.entries()).flatMap(([from, arr]) =>
+      (arr||[]).map(e => ({ from, to:e.to, type:e.type, revealed:!!e.revealed }))
+    ),
+    curId: S.curId,
+    startId: S.startId,
+    exitId: S.exitId,
+    keyId: S.keyId,
+    visited: Array.from(S.visited),
+    entered: Array.from(S.entered),
+    hasKey: !!S.hasKey,
+    player: { x:S.player.x, y:S.player.y },
+    hintText: document.getElementById('hint')?.textContent || ''
+  };
+}
+
+function hydrate(st){
+  S.level   = st.level || 1;
+  S.rooms   = (st.rooms || []).map(r => ({...r}));
+  S.adj     = new Map(S.rooms.map(r => [r.id, []]));
+  (st.edges || []).forEach(e => {
+    const list = S.adj.get(e.from);
+    if(list) list.push({ to:e.to, type:e.type, revealed:!!e.revealed });
+  });
+
+  S.curId   = st.curId;
+  S.startId = st.startId;
+  S.exitId  = st.exitId;
+  S.keyId   = st.keyId;
+
+  S.visited = new Set(st.visited || []);
+  S.entered = new Set(st.entered || []);
+  S.hasKey  = !!st.hasKey;
+
+  // player pos: trust saved value; fallback to room center
+  const cur = S.rooms.find(r => r.id === S.curId);
+  S.player  = st.player || (cur ? {x:cur.cx, y:cur.cy} : {x:0,y:0});
+
+  // restore UI bits
+  document.getElementById('levelNum').textContent = S.level;
+  const lvlLabel = document.getElementById('lvlLabel');
+  if(lvlLabel) lvlLabel.textContent = S.level;
+  const hintEl = document.getElementById('hint');
+  if(hintEl && st.hintText) hintEl.textContent = st.hintText;
+
+  computeView();
+  draw();
+}
+
     function beginMove(ids){
       const pts = ids.map(id=>({x:roomById(id).cx, y:roomById(id).cy}));
       S.anim = {ids, pts, seg:0, t:0, dur:0.2}; stepSeg(); animReq = requestAnimationFrame(tick);
@@ -1155,6 +1214,8 @@ exitBtn.onclick = ()=>{
     canvas.addEventListener('mousemove', onMouseMove);
     canvas.addEventListener('click', onClick);
     window.addEventListener('resize', fitCanvas);
+    document.addEventListener('keydown', onKeyDown); // <— add this
+
 
     // FIX: also react to container/layout changes
     const ro = new ResizeObserver(()=>{ fitCanvas(); });
