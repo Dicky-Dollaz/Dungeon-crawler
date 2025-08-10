@@ -1,0 +1,694 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Retro RPG — Combat</title>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#e9e5d0; --bg:#120e1c; --panel:#241a33; --rim:#6b4e10; --gold:#f6d26b;
+    --emerald:#63d297; --crimson:#ff5868; --steel:#a7b2c3; --amber:#ffd966;
+  }
+  *{box-sizing:border-box} html,body{height:100%}
+  body{
+    margin:0; background:
+      radial-gradient(1200px 700px at 20% -10%, #2b1f45 0%, transparent 60%),
+      radial-gradient(1200px 700px at 120% 110%, #201632 0%, transparent 60%),
+      var(--bg);
+    color:var(--ink); font-family:"VT323", monospace; letter-spacing:.2px; image-rendering:pixelated;
+  }
+  .wrap{max-width:1200px; margin:18px auto; padding:10px;}
+  header{display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;}
+  .title{font-family:"Press Start 2P"; color:var(--gold); font-size:20px; text-shadow:2px 2px 0 #6b4e10, 4px 4px 0 #2a1d3c;}
+  .btn{font-family:"Press Start 2P"; font-size:12px; background:#211632; color:var(--ink); border:3px solid #4a356c; border-radius:12px; padding:10px 12px; cursor:pointer}
+  .btn:active{transform:translateY(2px)}
+  .grid{
+    background:linear-gradient(#2e2147,#1b1328); border:4px solid var(--rim); border-image:linear-gradient(180deg,#a9842b,#6b4e10) 1;
+    border-radius:14px; box-shadow:0 10px 0 #0a0710, 0 14px 0 #07050b; padding:12px;
+    display:grid; grid-template-columns:1fr; gap:10px;
+  }
+  .arena{
+    position:relative; height:520px; border:3px solid #4a356c; border-radius:12px; background:
+      radial-gradient(600px 300px at 30% 30%, rgba(246,210,107,.09), transparent 60%),
+      radial-gradient(600px 300px at 70% 70%, rgba(99,210,151,.06), transparent 60%),
+      #110a1b;
+    overflow:hidden;
+  }
+  .sideLabel{position:absolute; top:8px; font-family:"Press Start 2P"; font-size:11px; opacity:.8}
+  .sideLabel.left{left:12px} .sideLabel.right{right:12px}
+  .tiles{
+    position:absolute; inset:0; display:grid; grid-template-columns:1fr 1fr; padding:18px 24px;
+  }
+  .col{display:grid; align-content:center; gap:26px}
+  .tile{
+    height:140px; border:3px dashed #3b2a56; border-radius:12px; position:relative; display:flex; align-items:center; justify-content:center;
+    background:rgba(255,255,255,.02);
+  }
+  .unit{
+    position:absolute; inset:0; display:flex; align-items:center; justify-content:center; pointer-events:none;
+  }
+  .sprite{ width:96px; height:96px; image-rendering:pixelated; }
+  .barWrap{
+    position:absolute; left:8px; right:8px; bottom:-6px; display:grid; gap:4px;
+  }
+  .bar{height:12px; border:2px solid #4a356c; background:#150f23; border-radius:8px; overflow:hidden; position:relative}
+  .hp{--c:#ff5868} .mp{--c:#63d297} .atb{--c:#ffd966}
+  .fill{height:100%; width:0%; background:linear-gradient(90deg, var(--c), #ffffff40)}
+  .barLabel{position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:13px; color:#e9e5d0cc}
+  .statusChips{position:absolute; top:6px; left:6px; display:flex; gap:6px}
+  .chip{font-size:11px; padding:3px 6px; border-radius:8px; border:2px solid #4a356c; background:#1b1328bb}
+  .chip.green{border-color:#3b7f5f; color:#9be0be}
+  .chip.red{border-color:#7f3b4a; color:#ff9cab}
+  .chip.gold{border-color:#6b4e10; color:#ffd966}
+  .nameplate{position:absolute; top:-14px; left:8px; right:8px; font-family:"Press Start 2P"; font-size:11px; color:var(--amber); text-align:center}
+
+  .ui{
+    display:grid; grid-template-columns: 2fr 1fr; gap:10px;
+  }
+  .log{border:3px solid #4a356c; border-radius:12px; padding:10px; min-height:96px; background:#110a1b; overflow:auto; font-size:16px}
+  .actions{border:3px solid #4a356c; border-radius:12px; padding:10px; background:#110a1b; display:grid; gap:8px}
+  .row{display:flex; gap:8px; flex-wrap:wrap}
+  .spellList{display:flex; gap:8px; flex-wrap:wrap}
+  .btn.small{font-size:11px; padding:8px 10px}
+  .btn.alt{border-color:#6b4e10}
+  .btn.disabled{opacity:.5; pointer-events:none}
+  .tip{opacity:.85; font-size:16px}
+
+  .overlay{
+    position:absolute; inset:0; display:none; align-items:center; justify-content:center; background:rgba(0,0,0,.65); z-index:20;
+  }
+  .card{
+    background:linear-gradient(#2e2147,#1b1328); border:4px solid var(--rim); border-radius:16px; padding:16px; width:520px;
+    text-align:center; box-shadow:0 10px 0 #0a0710, 0 14px 0 #07050b;
+  }
+  .card h2{margin:0 0 10px 0; font-family:"Press Start 2P"; color:var(--gold); font-size:18px}
+  .drops{margin-top:8px; font-size:18px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="title">THE DUNGEON BELOW — Combat</div>
+    <div>
+      <button id="newBattle" class="btn">Start Battle</button>
+      <button id="regenerate" class="btn alt">New Enemies</button>
+    </div>
+  </header>
+
+  <div class="grid">
+    <div class="arena" id="arena">
+      <div class="sideLabel left">ALLIES</div>
+      <div class="sideLabel right">ENEMIES</div>
+      <div class="tiles">
+        <div class="col" id="allyCol">
+          <div class="tile" data-slot="ally-0"></div>
+          <div class="tile" data-slot="ally-1"></div>
+          <div class="tile" data-slot="ally-2"></div>
+        </div>
+        <div class="col" id="enemyCol">
+          <div class="tile" data-slot="enemy-0"></div>
+          <div class="tile" data-slot="enemy-1"></div>
+          <div class="tile" data-slot="enemy-2"></div>
+        </div>
+      </div>
+
+      <div id="overlay" class="overlay">
+        <div class="card">
+          <h2 id="ovTitle">Battle Result</h2>
+          <div id="ovText" class="tip"></div>
+          <div id="ovDrops" class="drops"></div>
+          <div style="margin-top:12px">
+            <button id="ovBtn" class="btn">Continue</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="ui">
+      <div class="log" id="log" aria-live="polite"></div>
+      <div class="actions">
+        <div class="row">
+          <button id="actAttack" class="btn small">Attack</button>
+          <button id="actDefend" class="btn small">Defend</button>
+          <button id="actMagic" class="btn small">Magic</button>
+          <span id="turnHint" class="tip"></span>
+        </div>
+        <div id="spells" class="spellList"></div>
+        <div class="tip">Tip: Timers fill faster with higher <b>Agility</b>. Slime’s <b>Goop Spray</b> slows timers.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ====== tiny bleeps ====== */
+const SFX = {
+  bleep(freq=660, dur=0.05){ try{
+    const ctx = new (window.AudioContext||window.webkitAudioContext)();
+    const o=ctx.createOscillator(), g=ctx.createGain(); o.type="square";
+    o.connect(g); g.connect(ctx.destination); o.frequency.value=freq;
+    g.gain.setValueAtTime(0.09, ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime+dur);
+    o.start(); o.stop(ctx.currentTime+dur+0.01);
+  }catch(e){} }
+};
+
+/* ====== portrait sprites for log/side (hero only) ====== */
+function drawPixelSprite(canvas, map, palette, scale=6){
+  const ctx = canvas.getContext('2d');
+  const size = map.length; canvas.width=size*scale; canvas.height=size*scale;
+  ctx.imageSmoothingEnabled = false;
+  for(let y=0;y<size;y++) for(let x=0;x<size;x++){
+    const ch = map[y][x]; if(ch!=='.'){ ctx.fillStyle = palette[ch]||'#000'; ctx.fillRect(x*scale, y*scale, scale, scale); }
+  }
+}
+const PALETTES = {
+  paladin: {s:"#f3c9a6", h:"#5a4126", a:"#a7b2c3", g:"#f6d26b", c:"#5e6a8a", w:"#e9e5d0", b:"#6b4e10", d:"#2b2f3a"},
+  wizard : {s:"#eec6a8", h:"#dbbfff", a:"#7e7bb3", g:"#caa4ff", c:"#5c3ca3", w:"#f8f6ff", b:"#3b2c66", m:"#63d297", d:"#24173e"},
+  assassin:{s:"#d9b89e", h:"#2b2f3a", a:"#495464", g:"#9aa7b2", c:"#1f2530", w:"#e5e7eb", b:"#2c3a48", r:"#ff5868", d:"#151a22"},
+  warrior: {s:"#e8b894", h:"#7a4f28", a:"#8a6d4b", g:"#d9b37d", c:"#614c3b", w:"#e9e5d0", b:"#5a3a22", d:"#2a1d13"},
+  nerd   : {s:"#eac6ad", h:"#232b36", a:"#9db4c0", g:"#f6d26b", c:"#3da5ff", w:"#ffffff", b:"#2b3e50", n:"#6de2f8", d:"#1b2430"}
+};
+const MAPS = {
+  paladin: [
+  "..wwwwww........",".wssssssw.......",".wshsshsw.......",".wssssssw.......","..wssssw........","...cccc.........","..caaaaac.......",
+  ".caggggaac......",".caggggaac..ww..",".caaaaaaac.wggw.","..caccac...wggw.","..b.b..b....ww..","..b.b..b........","...b..b.........","....dd..........","....dd.........."
+  ],
+  wizard: [
+  "......mmmmm.....",".....mmmmm......","......mmmm......","....wsssssww....","...wshsshsw.....","...wsssssww.....",".....cccc.......","....ccccc.......",
+  "...cccccmm......","...caaaacm......","...cawawc.......","...caaaac.......","....b...b.......","....b...b.......",".....d.d........",".....d.d........"
+  ],
+  assassin: [
+  "......rrrr......",".....rccccr.....","......r..r......","...wsssssww.....","..wshsshsw......","..wsssssww......","...cccccc.......","..caaaaaac......",
+  "..caa..aac..r...","...caccac..rr...","....b..b..r.....","....b..b.r......",".....b.b........",".....b.b........",".....d..........",".....d.........."
+  ],
+  warrior: [
+  ".......d........","...wwdssdww.....","..wssshsssw.....","..wsssssssw.....","...wsssssww.....","....ccccc.......","...caaaaac......","..caggggaac.....",
+  "..caaaaaaac.....","...caccac.......","....b..b..d.....","....b..b..d.....",".....b.b........",".....b.b........","......d.........","......d........."
+  ],
+  nerd: [
+  ".....wwwwww.....","....wsh..hsw....","....wswwwwsw....","....wssn nsw....",".....wssssw.....","......cccc......",".....caaaaac....","....cawggwac....",
+  "....caaaaaac....",".....caccac.....","......b..b......","......b..b......",".....b....b.....",".....b....b.....","......d..d......","......d..d......"
+  ]
+};
+
+/* ====== hero load ====== */
+function loadHero(){
+  const fallback = { key:'warrior', name:'Adventurer', class:'Wanderer',
+    stats:{Health:8, Attack:4, Defense:4, Magic:2, Agility:2}, xp:0, level:1
+  };
+  try{
+    const j = localStorage.getItem('rpgCharacter'); if(!j) return fallback;
+    const h = JSON.parse(j); if(!h.name || !h.stats) return fallback;
+    if(h.xp==null) h.xp=0; if(h.level==null) h.level=1;
+    return h;
+  }catch(e){ return fallback; }
+}
+const HERO = loadHero();
+
+/* ====== inventory ====== */
+const Inventory = {
+  load(){ try{ return JSON.parse(localStorage.getItem('inventory_v1')) || {gold:0, items:[]} }catch(e){ return {gold:0, items:[]} } },
+  save(d){ localStorage.setItem('inventory_v1', JSON.stringify(d)); }
+};
+const INV = Inventory.load();
+
+/* ====== combat system ====== */
+const Combat = (function(){
+  const BASE_INTERVAL = 3.0; // seconds per turn before agility & debuffs
+  const SLIME_COLORS = ["#7eea7a", "#64d462", "#4fbd4d"];
+
+  const arena = document.getElementById('arena');
+  const logEl = document.getElementById('log');
+  const overlay = document.getElementById('overlay');
+  const ovTitle = document.getElementById('ovTitle');
+  const ovText  = document.getElementById('ovText');
+  const ovDrops = document.getElementById('ovDrops');
+  const ovBtn   = document.getElementById('ovBtn');
+
+  const tiles = {
+    allies: [qs('[data-slot="ally-0"]'), qs('[data-slot="ally-1"]'), qs('[data-slot="ally-2"]')],
+    enemies: [qs('[data-slot="enemy-0"]'), qs('[data-slot="enemy-1"]'), qs('[data-slot="enemy-2"]')]
+  };
+
+  let running=false, paused=false, lastTS=null;
+
+  const state = {
+    allies: [], enemies: [],
+    actorMenu: null, // current player-unit awaiting input
+  };
+
+  /* ---- helpers ---- */
+  function qs(sel){ return document.querySelector(sel); }
+  function clamp(v,a,b){ return Math.max(a, Math.min(b, v)); }
+  function rnd(a,b){ return a + Math.random()*(b-a); }
+  function irand(a,b){ return Math.floor(rnd(a,b+1)); }
+  function log(msg){ logEl.innerHTML += msg + "<br/>"; logEl.scrollTop = logEl.scrollHeight; }
+
+  function makeBars(host){
+    const name = el('div','nameplate'); host.appendChild(name);
+    const chips = el('div','statusChips'); host.appendChild(chips);
+    const wrap = el('div','barWrap');
+    wrap.appendChild(bar('hp')); wrap.appendChild(bar('mp')); wrap.appendChild(bar('atb'));
+    host.appendChild(wrap);
+    return { name, chips, bars: {
+      hp: wrap.children[0].querySelector('.fill'),
+      hpLbl: wrap.children[0].querySelector('.barLabel'),
+      mp: wrap.children[1].querySelector('.fill'),
+      mpLbl: wrap.children[1].querySelector('.barLabel'),
+      atb: wrap.children[2].querySelector('.fill'),
+      atbLbl: wrap.children[2].querySelector('.barLabel'),
+    }};
+  }
+  function bar(kind){
+    const w = el('div', 'bar '+kind);
+    const f = el('div', 'fill'); const lbl = el('div','barLabel');
+    w.appendChild(f); w.appendChild(lbl); return w;
+  }
+  function el(tag, cls){ const x=document.createElement(tag); if(cls) x.className=cls; return x; }
+
+  function coreStatsFromSheet(sheet, isHelper=false){
+    const H=sheet.stats.Health||8, A=sheet.stats.Attack||4, D=sheet.stats.Defense||4, M=sheet.stats.Magic||2, G=sheet.stats.Agility||2;
+    const hpm = isHelper ? (30 + H*6) : (50 + H*10);
+    const mp  = isHelper ? 0 : (100 + M*10);
+    const atk = (isHelper ? 4 : 6) + A*2;
+    const def = 2 + D*2;
+    const mag = 6 + M*3;
+    const agi = 1 + G*0.12; // multiplier
+    return {maxHP:hpm, maxMP:mp, atk, def, mag, agi};
+  }
+
+  function intervalSeconds(unit){
+    // faster with agility, slower if gooped
+    const speed = 1.0 * unit.stats.agi * (unit.goopMult || 1.0); // goopMult >1 means slower
+    return BASE_INTERVAL / speed;
+  }
+
+  function damageRoll(base, targetDef){ return Math.max(1, Math.floor(base * rnd(0.9,1.1) - targetDef*0.6)); }
+
+  /* ---- entities ---- */
+  function mkAllyFromHero(slotIndex){
+    const t = tiles.allies[slotIndex];
+    const tile = setupTile(t);
+    const stats = coreStatsFromSheet(HERO,false);
+    const u = {
+      id:'hero', side:'ally', name:HERO.name || 'Hero', slot:slotIndex, tile, stats,
+      hp:stats.maxHP, mp:stats.maxMP,
+      ready: false, tAccum: rnd(0, intervalSeconds({stats})*0.8),
+      guarding:false, goopMult:1.0, goopTime:0,
+      canCast:true, isHelper:false, dead:false,
+      sprite: drawHeroSprite(tile.canvas),
+      spells: [
+        {id:'bolt', name:'Lightning Bolt', cost:20, aoe:false, desc:'Zaps a foe.'},
+        {id:'inferno', name:'Inferno', cost:40, aoe:true, desc:'Burn all enemies.'},
+        {id:'summon', name:'Summon', cost:50, aoe:false, desc:'Call a helper.'},
+      ]
+    };
+    tile.ui.name.textContent = `${u.name} (Lv ${HERO.level||1})`;
+    updateBars(u);
+    return u;
+  }
+
+  function mkHelper(slotIndex){
+    const t = tiles.allies[slotIndex];
+    const tile = setupTile(t);
+    const base = coreStatsFromSheet(HERO,true);
+    const u = {
+      id:'helper-'+Date.now(), side:'ally', name:'Summoned', slot:slotIndex, tile, stats:base,
+      hp:base.maxHP, mp:0,
+      ready:false, tAccum:rnd(0, intervalSeconds({stats:base})*0.6),
+      guarding:false, goopMult:1.0, goopTime:0,
+      canCast:false, isHelper:true, dead:false,
+      sprite: drawHelperSprite(tile.canvas),
+      spells:[]
+    };
+    tile.ui.name.textContent = `Helper`;
+    updateBars(u);
+    return u;
+  }
+
+  function mkSlime(slotIndex, n){
+    const t = tiles.enemies[slotIndex];
+    const tile = setupTile(t);
+    const lvl = clamp((HERO.level||1),1,99);
+    const hp = 45 + lvl*6 + irand(0,6);
+    const mp = 30 + lvl*4;
+    const u = {
+      id:'slime-'+n, side:'enemy', name:'Slime', slot:slotIndex, tile,
+      stats:{maxHP:hp, maxMP:mp, atk:8+lvl*1.2, def:3+lvl*0.8, mag:6+lvl, agi:1+0.1+0.04*lvl},
+      hp, mp,
+      ready:false, tAccum:rnd(0, intervalSeconds({stats:{agi:1+0.04*lvl}})*0.9),
+      guarding:false, goopMult:1.0, goopTime:0,
+      dead:false,
+      sprite: drawSlime(tile.canvas, SLIME_COLORS[n%SLIME_COLORS.length]),
+      spells:[{id:'goop', name:'Goop Spray', cost:12}]
+    };
+    tile.ui.name.textContent = `Slime`;
+    updateBars(u);
+    return u;
+  }
+
+  function setupTile(tile){
+    tile.innerHTML='';
+    const unit = el('div','unit'); tile.appendChild(unit);
+    const cvs = document.createElement('canvas'); cvs.width=96; cvs.height=96; cvs.className='sprite'; unit.appendChild(cvs);
+    const ui = makeBars(tile);
+    return {canvas:cvs, ui};
+  }
+
+  function drawHeroSprite(canvas){
+    const key = (HERO.key && MAPS[HERO.key]) ? HERO.key : 'warrior';
+    drawPixelSprite(canvas, MAPS[key], PALETTES[key], 6);
+    return key;
+  }
+  function drawHelperSprite(canvas){
+    // simple blue wisp
+    const ctx = canvas.getContext('2d'); ctx.clearRect(0,0,96,96);
+    ctx.fillStyle = "#6de2f8"; for(let i=0;i<6;i++){ ctx.beginPath(); ctx.arc(48, 60-i*8, 12-i, 0, Math.PI*2); ctx.fill(); }
+  }
+  function drawSlime(canvas, color){
+    const ctx = canvas.getContext('2d'); ctx.clearRect(0,0,96,96);
+    ctx.fillStyle = color; ctx.fillRect(20,48,56,24);
+    ctx.beginPath(); ctx.moveTo(20,48); ctx.bezierCurveTo(24,32,72,32,76,48); ctx.lineTo(76,72); ctx.lineTo(20,72); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = "#120a1b"; ctx.fillRect(36,50,8,6); ctx.fillRect(56,50,8,6); // eyes
+    ctx.fillRect(44,62,8,3); // mouth
+    return 'slime';
+  }
+
+  /* ---- UI updates ---- */
+  function updateBars(u){
+    const hpP = Math.round(100 * u.hp / u.stats.maxHP);
+    const mpP = Math.round(100 * (u.mp||0) / (u.stats.maxMP||1));
+    const itv = intervalSeconds(u);
+    const atbP = clamp(Math.round(100 * (u.tAccum / itv)), 0, 100);
+
+    u.tile.ui.bars.hp.style.width = hpP+'%';
+    u.tile.ui.bars.hpLbl.textContent = `HP ${u.hp}/${u.stats.maxHP}`;
+
+    u.tile.ui.bars.mp.style.width = mpP+'%';
+    u.tile.ui.bars.mpLbl.textContent = `MP ${u.mp||0}/${u.stats.maxMP||0}`;
+
+    u.tile.ui.bars.atb.style.width = atbP+'%';
+    u.tile.ui.bars.atbLbl.textContent = u.ready ? 'READY' : `${(itv - u.tAccum).toFixed(1)}s`;
+    // chips
+    const chips = u.tile.ui.chips; chips.innerHTML='';
+    if(u.guarding) chips.appendChild(chip('Guard','green'));
+    if(u.goopTime>0) chips.appendChild(chip('Gooped','red'));
+  }
+  function chip(text, color){ const c = el('div','chip '+color); c.textContent = text; return c; }
+
+  function placeAllies(){
+    state.allies = [null,null,null];
+    // hero in middle
+    state.allies[1] = mkAllyFromHero(1);
+  }
+
+  function firstFreeAllySlot(){
+    for(let i of [0,2]) if(!state.allies[i] || state.allies[i].dead) return i;
+    return null;
+  }
+
+  function placeEnemies(count){
+    state.enemies = [null,null,null];
+    const slots = [0,1,2]; // try center bias when multiple
+    const order = (count===1)?[1]: (count===2? [0,2] : [0,1,2]);
+    order.forEach((slot,i)=> state.enemies[slot] = mkSlime(slot,i));
+  }
+
+  /* ---- actions ---- */
+  function doAttack(attacker, target){
+    const pwr = attacker.stats.atk;
+    let dmg = damageRoll(pwr, target.stats.def);
+    if(target.guarding){ dmg = Math.floor(dmg*0.5); target.guarding=false; }
+    target.hp = clamp(target.hp - dmg, 0, target.stats.maxHP);
+    log(`<span style="color:${attacker.side==='ally'?'#63d297':'#ff5868'}">${attacker.name}</span> attacks ${target.name} for <b>${dmg}</b>.`);
+    SFX.bleep(700);
+    afterAction(attacker);
+    checkDeaths();
+  }
+  function doDefend(u){
+    u.guarding = true;
+    log(`${u.name} braces for impact.`);
+    SFX.bleep(520);
+    afterAction(u);
+  }
+  function doBolt(caster, target){
+    const cost=20; if((caster.mp||0)<cost){ log(`Not enough MP.`); return false; }
+    caster.mp -= cost;
+    let dmg = Math.floor(caster.stats.mag*1.6 + rnd(6,10)) - Math.floor(target.stats.def*0.4);
+    if(target.guarding){ dmg=Math.floor(dmg*0.5); target.guarding=false; }
+    dmg = Math.max(1,dmg);
+    target.hp = clamp(target.hp - dmg, 0, target.stats.maxHP);
+    log(`${caster.name} casts <b>Lightning Bolt</b> on ${target.name} for <b>${dmg}</b>. ⚡`);
+    SFX.bleep(880);
+    afterAction(caster);
+    checkDeaths();
+    return true;
+  }
+  function doInferno(caster, targets){
+    const cost=40; if((caster.mp||0)<cost){ log(`Not enough MP.`); return false; }
+    caster.mp -= cost;
+    targets.forEach(t=>{
+      let dmg = Math.floor(caster.stats.mag*1.2 + rnd(4,8)) - Math.floor(t.stats.def*0.35);
+      if(t.guarding){ dmg=Math.floor(dmg*0.5); t.guarding=false; }
+      t.hp = clamp(t.hp - Math.max(1,dmg), 0, t.stats.maxHP);
+    });
+    log(`${caster.name} unleashes <b>Inferno</b> on all foes! 🔥`);
+    SFX.bleep(940);
+    afterAction(caster);
+    checkDeaths();
+    return true;
+  }
+  function doSummon(caster){
+    const cost=50; if((caster.mp||0)<cost){ log(`Not enough MP.`); return false; }
+    const slot = firstFreeAllySlot(); if(slot==null){ log(`No space to summon.`); return false; }
+    caster.mp -= cost;
+    const helper = mkHelper(slot);
+    state.allies[slot] = helper;
+    log(`${caster.name} summons a helper! ✨`);
+    SFX.bleep(840);
+    afterAction(caster);
+    return true;
+  }
+  function doGoop(attacker, target){
+    const cost=12; if(attacker.mp >= cost){ attacker.mp -= cost; }
+    const base = Math.floor(attacker.stats.mag*0.6 + rnd(2,4));
+    let dmg = base - Math.floor(target.stats.def*0.3);
+    if(target.guarding){ dmg=Math.floor(dmg*0.5); target.guarding=false; }
+    dmg = Math.max(1,dmg);
+    target.hp = clamp(target.hp - dmg, 0, target.stats.maxHP);
+    // slow: increase goop multiplier for 6s
+    target.goopMult = (target.goopMult||1)*0.8; // smaller speed -> slower (we'll invert in interval)
+    target.goopTime = 6.0;
+    log(`Slime splatters <b>Goop Spray</b> on ${target.name} for <b>${dmg}</b>. 🧪 Their timer slows!`);
+    SFX.bleep(600);
+    afterAction(attacker);
+    checkDeaths();
+  }
+
+  function afterAction(u){
+    u.tAccum = 0; u.ready=false;
+    updateBars(u);
+  }
+
+  function randomLiving(units){ const alive = units.filter(x=>x && !x.dead && x.hp>0); return alive.length? alive[irand(0,alive.length-1)] : null; }
+
+  function enemyAI(u){
+    // choose between attack/defend/goop
+    const roll = Math.random();
+    const target = randomLiving(state.allies);
+    if(!target){ return; }
+    if(u.mp>=12 && roll<0.35){
+      doGoop(u, target);
+    }else if(roll<0.15){
+      doDefend(u);
+    }else{
+      doAttack(u, target);
+    }
+  }
+
+  /* ---- ticking ---- */
+  function tick(ts){
+    if(!running || paused){ lastTS=ts; requestAnimationFrame(tick); return; }
+    if(lastTS==null) lastTS=ts;
+    let dt = Math.min(0.05, (ts-lastTS)/1000); lastTS=ts;
+
+    [...state.allies, ...state.enemies].forEach(u=>{
+      if(!u || u.dead) return;
+      // status timers
+      if(u.goopTime>0){ u.goopTime -= dt; if(u.goopTime<=0){ u.goopTime=0; u.goopMult=1.0; } }
+      // atb
+      const itv = intervalSeconds(u);
+      if(!u.ready){
+        u.tAccum += dt;
+        if(u.tAccum >= itv){ u.ready=true; }
+      }
+      updateBars(u);
+    });
+
+    // handle turns
+    if(!state.actorMenu){
+      // resolve all enemy ready first (simultaneous readiness -> enemies act first for snappier feel)
+      const enemyReady = state.enemies.find(u=>u && u.ready && !u.dead);
+      if(enemyReady){ enemyAI(enemyReady); }
+      else{
+        const allyReady = state.allies.find(u=>u && u.ready && !u.dead);
+        if(allyReady){
+          openMenu(allyReady);
+        }
+      }
+    }
+
+    // victory / defeat checks are also run post action
+    requestAnimationFrame(tick);
+  }
+
+  function checkDeaths(){
+    state.allies.forEach(u=>{ if(u && u.hp<=0 && !u.dead){ u.dead=true; u.tile.ui.name.textContent += ' [KO]'; } });
+    state.enemies.forEach(u=>{ if(u && u.hp<=0 && !u.dead){ u.dead=true; u.tile.ui.name.textContent += ' [KO]'; } });
+
+    const hero = state.allies[1];
+    if(hero && hero.hp<=0){
+      endBattle(false);
+      return;
+    }
+    const anyEnemyAlive = state.enemies.some(u=>u && !u.dead && u.hp>0);
+    if(!anyEnemyAlive){
+      endBattle(true);
+    }
+  }
+
+  /* ---- player menu ---- */
+  const btnAttack = qs('#actAttack'), btnDefend = qs('#actDefend'), btnMagic = qs('#actMagic');
+  const spellsWrap = qs('#spells'), turnHint = qs('#turnHint');
+
+  function openMenu(u){
+    paused = true; state.actorMenu = u;
+    turnHint.textContent = `Your turn: ${u.name}`;
+    spellsWrap.innerHTML='';
+    const canAct = (v)=> !v || !v.dead;
+
+    // wire buttons
+    btnAttack.onclick = ()=>{
+      const tgt = targetSelect(u.side==='ally' ? state.enemies : state.allies, 'Choose a target for Attack');
+      tgt.then(target=>{
+        if(!target) { resume(); return; }
+        doAttack(u, target); resume();
+      });
+    };
+    btnDefend.onclick = ()=>{ doDefend(u); resume(); };
+    btnMagic.onclick = ()=>{
+      // list spells for caster (hero only has 3; helper has none)
+      spellsWrap.innerHTML='';
+      (u.spells||[]).forEach(sp=>{
+        const b = el('button','btn small'); b.textContent = `${sp.name} (${sp.cost} MP)`;
+        if((u.mp||0)<sp.cost) b.classList.add('disabled');
+        b.onclick = ()=>{
+          if(sp.id==='bolt'){
+            targetSelect(state.enemies,'Choose a target for Lightning').then(t=>{ if(!t){resume();return;} if(doBolt(u,t)) resume(); });
+          }else if(sp.id==='inferno'){
+            if(doInferno(u, state.enemies.filter(x=>x && !x.dead))) resume();
+          }else if(sp.id==='summon'){
+            if(doSummon(u)) resume();
+          }
+        };
+        spellsWrap.appendChild(b);
+      });
+    };
+  }
+  function resume(){
+    spellsWrap.innerHTML=''; turnHint.textContent='';
+    state.actorMenu = null; paused=false;
+  }
+
+  function targetSelect(candidates, prompt){
+    turnHint.textContent = prompt;
+    return new Promise(resolve=>{
+      const clickable = [];
+      candidates.forEach(u=>{
+        if(!u || u.dead) return;
+        const high = el('div'); // glow overlay
+        high.style.position='absolute'; high.style.inset='0'; high.style.border='3px dashed #63d297';
+        high.style.borderRadius='12px'; high.style.pointerEvents='auto'; high.style.cursor='pointer';
+        u.tile.canvas.parentElement.parentElement.appendChild(high);
+        high.onclick = ()=>{ cleanup(); resolve(u); };
+        clickable.push(high);
+      });
+      function cleanup(){ clickable.forEach(h=>h.remove()); }
+      // cancel if user clicks elsewhere
+      const abort = (e)=>{ if(!clickable.some(h=>h.contains(e.target))){ cleanup(); resolve(null); document.removeEventListener('click', abort, true); } };
+      setTimeout(()=>document.addEventListener('click', abort, true),0);
+    });
+  }
+
+  /* ---- lifecycle ---- */
+  function newBattle(){
+    // reset UI
+    logEl.innerHTML='';
+    document.querySelectorAll('.tile').forEach(t=> t.innerHTML='');
+    overlay.style.display='none';
+
+    placeAllies();
+    placeEnemies(irand(1,3));
+    running=true; paused=false; lastTS=null;
+    requestAnimationFrame(tick);
+    log(`<b>Battle started!</b>`);
+    SFX.bleep(760);
+  }
+
+  function regenerateEnemies(){
+    // keep allies, refresh enemies
+    document.querySelectorAll('[data-slot^="enemy"]').forEach(t=>t.innerHTML='');
+    placeEnemies(irand(1,3));
+    log(`<i>New enemies approach…</i>`);
+  }
+
+  function endBattle(playerWon){
+    running=false; paused=true;
+    overlay.style.display='flex';
+    if(playerWon){
+      const alive = state.enemies.filter(x=>x).length;
+      const xpGain = 12 * alive + irand(0,6);
+      ovTitle.textContent = "Victory!";
+      ovText.textContent = `You gain ${xpGain} XP. The slimes leave some goo behind…`;
+      // loot
+      const loot = [];
+      const gold = irand(8,30); if(gold){ INV.gold += gold; loot.push(`${gold} gold`); }
+      const itemsPool = ['Slime Goo','Sticky Resin','Green Core','Cracked Vial'];
+      if(Math.random()<0.6){ const it = itemsPool[irand(0,itemsPool.length-1)]; INV.items.push(it); loot.push(it); }
+      Inventory.save(INV);
+      document.getElementById('ovDrops').textContent = loot.length? `Loot: ${loot.join(', ')}` : 'Loot: (none)';
+      // xp → stash on hero
+      try{
+        const stored = JSON.parse(localStorage.getItem('rpgCharacter')) || HERO;
+        stored.xp = (stored.xp||0) + xpGain;
+        localStorage.setItem('rpgCharacter', JSON.stringify(stored));
+      }catch(e){}
+      SFX.bleep(880);
+    }else{
+      ovTitle.textContent = "Game Over";
+      ovText.textContent = "You collapse as the dungeon fades to black…";
+      document.getElementById('ovDrops').textContent = '';
+      SFX.bleep(300);
+    }
+    ovBtn.onclick = ()=>{
+      overlay.style.display='none';
+      if(playerWon){ newBattle(); } else { // reset hero HP and restart
+        newBattle();
+      }
+    };
+  }
+
+  return { newBattle, regenerateEnemies };
+})();
+
+/* ====== wire controls ====== */
+document.getElementById('newBattle').addEventListener('click', ()=>Combat.newBattle());
+document.getElementById('regenerate').addEventListener('click', ()=>Combat.regenerateEnemies());
+
+/* ====== little kick-off ====== */
+Combat.newBattle();
+</script>
+</body>
+</html>

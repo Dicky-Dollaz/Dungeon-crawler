@@ -1,0 +1,698 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Retro RPG — Rooms + Fog (Hover & Preview)</title>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#e9e5d0; --bg:#120e1c; --panel:#241a33; --rim:#6b4e10; --gold:#f6d26b;
+    --emerald:#63d297; --crimson:#ff5868; --shadow:0 10px 0 #0a0710, 0 14px 0 #07050b;
+  }
+  *{box-sizing:border-box} html,body{height:100%}
+  body{
+    margin:0; background:
+      radial-gradient(1000px 600px at 20% -10%, #2b1f45 0%, transparent 60%),
+      radial-gradient(1000px 600px at 120% 110%, #201632 0%, transparent 60%),
+      var(--bg);
+    color:var(--ink); font-family:"VT323", monospace; letter-spacing:.2px; image-rendering:pixelated;
+  }
+  .crt::after{
+    content:""; position:fixed; inset:0; pointer-events:none;
+    background:repeating-linear-gradient(0deg, rgba(255,255,255,.03) 0 2px, transparent 2px 4px);
+    mix-blend-mode:soft-light;
+  }
+  .wrap{max-width:1220px; margin:18px auto; padding:10px;}
+  header{display:flex; align-items:center; gap:12px; margin-bottom:10px;}
+  .title{font-family:"Press Start 2P"; color:var(--gold); font-size:20px; text-shadow:2px 2px 0 #6b4e10, 4px 4px 0 #2a1d3c;}
+  .sub{opacity:.85}
+  .screen{display:grid; grid-template-columns: 320px 1fr; gap:12px;}
+  @media (max-width: 980px){ .screen{grid-template-columns:1fr; } }
+
+  /* Sidebar */
+  .side{
+    background:linear-gradient(#2e2147,#1b1328);
+    border:4px solid var(--rim); border-image: linear-gradient(180deg,#a9842b,#6b4e10) 1;
+    border-radius:14px; padding:12px; box-shadow:var(--shadow);
+    display:grid; grid-template-rows:auto auto 1fr auto; gap:10px;
+  }
+  .heroCard{
+    display:grid; grid-template-columns:96px 1fr; gap:10px; align-items:center;
+    background:linear-gradient(#33264f,#241a33);
+    border:3px solid #4a356c; border-radius:12px; padding:10px;
+  }
+  .heroName{font-family:"Press Start 2P"; color:var(--gold); font-size:12px; line-height:1.3;}
+  .heroClass{color:var(--emerald); font-size:18px;}
+  .statRow{display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-top:6px;}
+  .stat{background:#1e1530; border:2px solid #4a356c; border-radius:8px; padding:6px; display:flex; align-items:center; gap:6px;}
+  .label{font-family:"Press Start 2P"; font-size:10px; color:var(--gold);}
+  .meter{flex:1; height:10px; border:2px solid #4a356c; background:#150f23; border-radius:8px; overflow:hidden}
+  .fill{height:100%; background:linear-gradient(90deg, var(--gold), var(--emerald)); width:0%}
+  .btn{
+    font-family:"Press Start 2P"; font-size:12px; letter-spacing:1px;
+    background:#211632; color:var(--ink); border:3px solid #4a356c; border-radius:12px; padding:10px; cursor:pointer;
+  }
+  .btn:active{transform:translateY(2px)}
+  .btnRow{display:grid; gap:8px; margin-top:6px;}
+  .note{opacity:.9; font-size:18px;}
+  .flag{color:var(--crimson)} .flag.ok{color:var(--emerald)} .gold{color:#ffd966}
+
+  /* Map panel */
+  .mapPanel{
+    background:linear-gradient(#2b1f45,#1b1328);
+    border:4px solid var(--rim); border-image: linear-gradient(180deg,#a9842b,#6b4e10) 1;
+    border-radius:14px; padding:12px; box-shadow:var(--shadow);
+    display:grid; grid-template-rows:auto 1fr auto; gap:8px;
+  }
+  .mapHeader{display:flex; justify-content:space-between; align-items:center; font-size:18px;}
+  .mapCanvasWrap{ border:3px solid #4a356c; border-radius:12px; background:#110a1b; display:grid; place-items:center; overflow:hidden; }
+  canvas#map{ width:100%; height:100%; max-height:72vh; cursor: crosshair; }
+
+  footer{text-align:center; margin-top:10px; opacity:.75; font-size:16px;}
+  .btn:focus{outline:3px dashed var(--emerald); outline-offset:2px}
+</style>
+</head>
+<body class="crt">
+<div class="wrap">
+  <header>
+    <div class="title">THE DUNGEON BELOW — Rooms + Fog</div>
+    <div class="sub">Hover to preview, click to travel • Arrows/WASD room-hop • <b>E</b> Search • <b>R</b> new level</div>
+  </header>
+
+  <div class="screen">
+    <!-- Sidebar -->
+    <aside class="side" aria-label="Hero panel & menu">
+      <div class="heroCard">
+        <canvas id="heroSprite" width="96" height="96" style="image-rendering:pixelated;width:96px;height:96px;"></canvas>
+        <div>
+          <div class="heroName" id="heroName">Unknown</div>
+          <div class="heroClass" id="heroClass">Adventurer</div>
+
+          <div class="statRow">
+            <div class="stat"><span class="label">HP</span><div class="meter"><div class="fill" id="hpFill"></div></div></div>
+            <div class="stat"><span class="label">ATK</span><div class="meter"><div class="fill" id="atkFill"></div></div></div>
+            <div class="stat"><span class="label">DEF</span><div class="meter"><div class="fill" id="defFill"></div></div></div>
+            <div class="stat"><span class="label">MAG</span><div class="meter"><div class="fill" id="magFill"></div></div></div>
+            <div class="stat"><span class="label">AGI</span><div class="meter"><div class="fill" id="agiFill"></div></div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="note">Key status: <span id="keyStatus" class="flag">Not found</span></div>
+      <div class="note">Level: <span id="levelNum">1</span> • <span class="gold">Gold:</span> <span id="goldAmt">0</span></div>
+
+      <div class="btnRow">
+        <button class="btn" id="inventoryBtn">Inventory</button>
+        <button class="btn" id="settingsBtn">Settings</button>
+      </div>
+
+      <div aria-live="polite" class="note" id="hint" style="margin-top:8px;">Hover a visible room to preview the path.</div>
+    </aside>
+
+    <!-- Map -->
+    <section class="mapPanel" aria-label="Dungeon map">
+      <div class="mapHeader">
+        <div>Dungeon Level <span id="lvlLabel">1</span></div>
+        <div id="coordLabel">Room —</div>
+      </div>
+      <div class="mapCanvasWrap">
+        <canvas id="map"></canvas>
+      </div>
+      <div class="mapHeader" style="opacity:.8">
+        <div>Doors connect rooms. <span style="color:var(--emerald)">Secret doors</span> need Search or luck.</div>
+        <div>Green path = reachable • Red dashed = blocked by secrets</div>
+      </div>
+    </section>
+  </div>
+
+  <footer>Monsters/Chests still placeholders — encounters & loot tables next.</footer>
+</div>
+
+<script>
+/* ---------- tiny bleeps ---------- */
+const SFX = {
+  bleep(freq=660, dur=0.05){
+    try{ const ctx = new (window.AudioContext||window.webkitAudioContext)();
+      const o = ctx.createOscillator(); const g = ctx.createGain();
+      o.connect(g); g.connect(ctx.destination);
+      o.type="square"; o.frequency.value=freq;
+      g.gain.setValueAtTime(0.09, ctx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime+dur);
+      o.start(); o.stop(ctx.currentTime+dur+0.01);
+    }catch(e){}
+  }
+};
+
+/* ---------- minimal pixel sprite for hero portrait ---------- */
+function drawPixelSprite(canvas, map, palette, scale=6){
+  const ctx = canvas.getContext('2d');
+  const size = map.length; canvas.width=size*scale; canvas.height=size*scale;
+  ctx.imageSmoothingEnabled = false;
+  for(let y=0;y<size;y++){
+    for(let x=0;x<size;x++){
+      const ch = map[y][x]; if(ch!=='.'){ ctx.fillStyle = palette[ch]||'#000'; ctx.fillRect(x*scale, y*scale, scale, scale); }
+    }
+  }
+}
+const PALETTES = {
+  paladin: {s:"#f3c9a6", h:"#5a4126", a:"#a7b2c3", g:"#f6d26b", c:"#5e6a8a", w:"#e9e5d0", b:"#6b4e10", d:"#2b2f3a"},
+  wizard : {s:"#eec6a8", h:"#dbbfff", a:"#7e7bb3", g:"#caa4ff", c:"#5c3ca3", w:"#f8f6ff", b:"#3b2c66", m:"#63d297", d:"#24173e"},
+  assassin:{s:"#d9b89e", h:"#2b2f3a", a:"#495464", g:"#9aa7b2", c:"#1f2530", w:"#e5e7eb", b:"#2c3a48", r:"#ff5868", d:"#151a22"},
+  warrior: {s:"#e8b894", h:"#7a4f28", a:"#8a6d4b", g:"#d9b37d", c:"#614c3b", w:"#e9e5d0", b:"#5a3a22", d:"#2a1d13"},
+  nerd   : {s:"#eac6ad", h:"#232b36", a:"#9db4c0", g:"#f6d26b", c:"#3da5ff", w:"#ffffff", b:"#2b3e50", n:"#6de2f8", d:"#1b2430"}
+};
+const MAPS = {
+  paladin: [
+  "..wwwwww........",".wssssssw.......",".wshsshsw.......",".wssssssw.......","..wssssw........","...cccc.........","..caaaaac.......",
+  ".caggggaac......",".caggggaac..ww..",".caaaaaaac.wggw.","..caccac...wggw.","..b.b..b....ww..","..b.b..b........","...b..b.........","....dd..........","....dd.........."
+  ],
+  wizard: [
+  "......mmmmm.....",".....mmmmm......","......mmmm......","....wsssssww....","...wshsshsw.....","...wsssssww.....",".....cccc.......","....ccccc.......",
+  "...cccccmm......","...caaaacm......","...cawawc.......","...caaaac.......","....b...b.......","....b...b.......",".....d.d........",".....d.d........"
+  ],
+  assassin: [
+  "......rrrr......",".....rccccr.....","......r..r......","...wsssssww.....","..wshsshsw......","..wsssssww......","...cccccc.......","..caaaaaac......",
+  "..caa..aac..r...","...caccac..rr...","....b..b..r.....","....b..b.r......",".....b.b........",".....b.b........",".....d..........",".....d.........."
+  ],
+  warrior: [
+  ".......d........","...wwdssdww.....","..wssshsssw.....","..wsssssssw.....","...wsssssww.....","....ccccc.......","...caaaaac......","..caggggaac.....",
+  "..caaaaaaac.....","...caccac.......","....b..b..d.....","....b..b..d.....",".....b.b........",".....b.b........","......d.........","......d........."
+  ],
+  nerd: [
+  ".....wwwwww.....","....wsh..hsw....","....wswwwwsw....","....wssn nsw....",".....wssssw.....","......cccc......",".....caaaaac....","....cawggwac....",
+  "....caaaaaac....",".....caccac.....","......b..b......","......b..b......",".....b....b.....",".....b....b.....","......d..d......","......d..d......"
+  ]
+};
+
+/* ---------- load hero ---------- */
+function loadHero(){
+  const fallback = { key:'warrior', name:'Adventurer', class:'Wanderer',
+    stats:{Health:8, Attack:4, Defense:4, Magic:2, Agility:2}
+  };
+  try{
+    const j = localStorage.getItem('rpgCharacter');
+    if(!j) return fallback;
+    const h = JSON.parse(j);
+    if(!h.name || !h.stats) return fallback;
+    return h;
+  }catch(e){ return fallback; }
+}
+const HERO = loadHero();
+(function renderHeroPanel(){
+  document.getElementById('heroName').textContent = HERO.name || 'Adventurer';
+  document.getElementById('heroClass').textContent = HERO.class || 'Wanderer';
+  const pct = v => Math.min(100, Math.round((v/20)*100));
+  document.getElementById('hpFill').style.width = pct((HERO.stats.Health||8))+'%';
+  document.getElementById('atkFill').style.width = pct((HERO.stats.Attack||4))+'%';
+  document.getElementById('defFill').style.width = pct((HERO.stats.Defense||4))+'%';
+  document.getElementById('magFill').style.width = pct((HERO.stats.Magic||2))+'%';
+  document.getElementById('agiFill').style.width = pct((HERO.stats.Agility||2))+'%';
+  const spriteKey = (HERO.key && MAPS[HERO.key]) ? HERO.key : 'warrior';
+  drawPixelSprite(document.getElementById('heroSprite'), MAPS[spriteKey], PALETTES[spriteKey], 6);
+})();
+
+/* ---------- inventory ---------- */
+const Inventory = {
+  load(){ try{ return JSON.parse(localStorage.getItem('inventory_v1')) || {gold:0, items:[]} }catch(e){ return {gold:0, items:[]} } },
+  save(d){ localStorage.setItem('inventory_v1', JSON.stringify(d)); }
+};
+const INV = Inventory.load(); document.getElementById('goldAmt').textContent = INV.gold;
+
+/* ===================================================================
+   DUNGEON — rooms + fog + hover highlight + ghost path preview
+=================================================================== */
+const Dungeon = (function(){
+  const canvas = document.getElementById('map');
+  const ctx = canvas.getContext('2d'); ctx.imageSmoothingEnabled = false;
+
+  const WORLD = { x:0, y:0, w:1600, h:1000 }; // fixed bounds for guaranteed fit
+  const MIN_LEAF_W = 260, MIN_LEAF_H = 200, MAX_DEPTH = 4;
+
+  const S = {
+    level:1,
+    rooms:[], adj:new Map(),
+    curId:null, startId:null, exitId:null, keyId:null,
+    visited:new Set(), hasKey:false,
+    player:{x:0,y:0},
+    anim:null, view:{tx:0,ty:0,s:1},
+    hoverId:null, hoverPath:null, hoverReachable:false
+  };
+
+  /* ---------- utils ---------- */
+  const roomById = id => S.rooms.find(r=>r.id===id);
+  const randRange = (a,b)=>{ a=Math.floor(a); b=Math.floor(b); return a + Math.floor(Math.random()*(Math.max(1,b-a))); };
+
+  /* ---------- BSP → rooms ---------- */
+  function splitLeaf(L, depth, out){
+    if(depth>=MAX_DEPTH || (L.w<=MIN_LEAF_W*2 && L.h<=MIN_LEAF_H*2)){ out.push(L); return; }
+    const canV = L.w >= MIN_LEAF_W*2, canH = L.h >= MIN_LEAF_H*2;
+    const doV = canV && canH ? Math.random()<0.5 : canV;
+    if(doV){
+      const cut = randRange(L.x+MIN_LEAF_W, L.x+L.w-MIN_LEAF_W);
+      splitLeaf({x:L.x, y:L.y, w:cut-L.x, h:L.h}, depth+1, out);
+      splitLeaf({x:cut, y:L.y, w:L.x+L.w-cut, h:L.h}, depth+1, out);
+    }else{
+      const cut = randRange(L.y+MIN_LEAF_H, L.y+L.h-MIN_LEAF_H);
+      splitLeaf({x:L.x, y:L.y, w:L.w, h:cut-L.y}, depth+1, out);
+      splitLeaf({x:L.x, y:cut, w:L.w, h:L.y+L.h-cut}, depth+1, out);
+    }
+  }
+  function makeRooms(leaves){
+    const rooms=[];
+    leaves.forEach((L,i)=>{
+      const margin=24; const maxW=Math.max(120, L.w-40), maxH=Math.max(100, L.h-40);
+      const w = randRange(Math.max(120, maxW*0.45), maxW);
+      const h = randRange(Math.max(100, maxH*0.45), maxH);
+      const x = randRange(L.x+margin, L.x+L.w-w-margin);
+      const y = randRange(L.y+margin, L.y+L.h-h-margin);
+      const r = {id:i, x, y, w, h};
+      r.cx = Math.floor(r.x + r.w/2); r.cy = Math.floor(r.y + r.h/2);
+      rooms.push(r);
+    });
+    return rooms;
+  }
+  function connectRooms(rooms){
+    const N=rooms.length;
+    const inTree=new Set([0]); const edges=[];
+    while(inTree.size<N){
+      let best=null, bestD=Infinity;
+      for(const i of inTree){
+        for(let j=0;j<N;j++){
+          if(inTree.has(j)) continue;
+          const d = Math.abs(rooms[i].cx-rooms[j].cx)+Math.abs(rooms[i].cy-rooms[j].cy);
+          if(d<bestD){ bestD=d; best=[i,j]; }
+        }
+      }
+      inTree.add(best[1]); edges.push(best);
+    }
+    for(let k=0;k<Math.floor(N*0.25);k++){
+      const a=randRange(0,N), b=randRange(0,N);
+      if(a!==b) edges.push([a,b]);
+    }
+    const adj = new Map(rooms.map(r=>[r.id, []]));
+    edges.forEach((e, idx)=>{
+      const [i,j]=e; const isTree = idx < (rooms.length-1);
+      const secret = !isTree && Math.random()<0.55;
+      const e1 = {to:j, type: secret?'secret':'door', revealed: !secret};
+      const e2 = {to:i, type: secret?'secret':'door', revealed: !secret};
+      adj.get(i).push(e1); adj.get(j).push(e2);
+    });
+    S.adj = adj;
+  }
+
+  function distancesFrom(startId, includeSecrets=false){
+    const q=[startId]; const dist=new Map([[startId,0]]);
+    while(q.length){
+      const u=q.shift();
+      for(const e of S.adj.get(u)||[]){
+        if(e.type==='secret' && !e.revealed && !includeSecrets) continue;
+        const v=e.to; if(dist.has(v)) continue;
+        dist.set(v, dist.get(u)+1); q.push(v);
+      }
+    }
+    return dist;
+  }
+
+  function specials(){
+    S.startId = S.rooms[Math.floor(Math.random()*S.rooms.length)].id;
+    const d = distancesFrom(S.startId,false);
+    let far=-1, farId=S.startId; for(const [rid,dd] of d.entries()){ if(dd>far){ far=dd; farId=rid; } }
+    S.exitId = farId;
+    const keyCands = S.rooms.filter(r=> r.id!==S.startId && r.id!==S.exitId && (d.get(r.id)||0) >= 4);
+    const keyRoom = keyCands.length ? keyCands[Math.floor(Math.random()*keyCands.length)]
+                                    : S.rooms.find(r=>r.id!==S.startId && r.id!==S.exitId) || S.rooms[0];
+    S.keyId = keyRoom.id;
+
+    S.rooms.forEach(r=>{ r.up=false; r.down=false; r.key=false; r.monster=false; r.chest=false; });
+    roomById(S.startId).up = true; roomById(S.exitId).down = true; roomById(S.keyId).key = true;
+
+    S.curId = S.startId; S.player = {x:roomById(S.curId).cx, y:roomById(S.curId).cy};
+    S.visited = new Set([S.curId]); S.hasKey=false;
+  }
+
+  function populate(){
+    S.rooms.forEach(r=>{
+      if(r.id===S.startId || r.id===S.exitId || r.id===S.keyId) return;
+      r.monster = Math.random()<0.30;
+      r.chest   = !r.monster && Math.random()<0.18;
+    });
+  }
+
+  /* ---------- guaranteed fit ---------- */
+  function computeView(){
+    const rect = canvas.getBoundingClientRect(); // CSS pixels
+    const pad = 40;
+    const worldW = WORLD.w + pad*2, worldH = WORLD.h + pad*2;
+    const s = Math.min(rect.width/worldW, rect.height/worldH);
+    const tx = (rect.width - s*(WORLD.w))/2 + s*WORLD.x;
+    const ty = (rect.height - s*(WORLD.h))/2 + s*WORLD.y;
+    S.view = {tx, ty, s};
+  }
+  function worldToScreen(x,y){ const {tx,ty,s}=S.view; return {x: tx + x*s, y: ty + y*s}; }
+  function screenToWorld(px,py){ const {tx,ty,s}=S.view; return {x:(px-tx)/s, y:(py-ty)/s}; }
+
+  /* ---------- fog visibility ---------- */
+  function visibleSet(){
+    const vis = new Set(S.visited); vis.add(S.curId);
+    for(const e of S.adj.get(S.curId)||[]){
+      if(e.type==='secret' && !e.revealed) continue;
+      vis.add(e.to);
+    }
+    return vis;
+  }
+
+  /* ---------- pathfinding ---------- */
+  function path(fromId,toId){
+    const q=[fromId]; const prev=new Map([[fromId,null]]);
+    while(q.length){
+      const u=q.shift(); if(u===toId) break;
+      for(const e of S.adj.get(u)||[]){
+        if(e.type==='secret' && !e.revealed) continue;
+        const v=e.to; if(prev.has(v)) continue;
+        prev.set(v,u); q.push(v);
+      }
+    }
+    if(!prev.has(toId)) return null;
+    const res=[]; let cur=toId; while(cur!=null){ res.push(cur); cur=prev.get(cur); }
+    return res.reverse();
+  }
+
+  /* ---------- movement ---------- */
+  function beginMove(ids){
+    const pts = ids.map(id=>({x:roomById(id).cx, y:roomById(id).cy}));
+    S.anim = {ids, pts, seg:0, t:0, dur:0.2};
+    stepSeg(); requestAnimationFrame(tick);
+    SFX.bleep(520);
+  }
+  function stepSeg(){
+    const a=S.anim.pts[S.anim.seg], b=S.anim.pts[S.anim.seg+1];
+    const dist = Math.hypot(b.x-a.x, b.y-a.y);
+    const speed = 380;
+    S.anim.t=0; S.anim.dur = Math.max(0.18, dist/speed);
+    S.anim.from=a; S.anim.to=b;
+  }
+  let lastTS=null;
+  function tick(ts){
+    if(!S.anim){ lastTS=null; return; }
+    if(lastTS==null) lastTS=ts;
+    const dt=Math.min(0.05,(ts-lastTS)/1000); lastTS=ts;
+    S.anim.t += dt/S.anim.dur;
+    const t=Math.min(1,S.anim.t);
+    const u = t<0.5 ? 2*t*t : -1 + (4 - 2*t)*t;
+    S.player.x = S.anim.from.x + (S.anim.to.x - S.anim.from.x)*u;
+    S.player.y = S.anim.from.y + (S.anim.to.y - S.anim.from.y)*u;
+    draw();
+    if(t>=1){
+      S.curId = S.anim.ids[S.anim.seg+1];
+      S.visited.add(S.curId);
+      onEnterRoom(S.curId);
+      S.anim.seg++;
+      if(S.anim.seg >= S.anim.ids.length-1){ S.anim=null; lastTS=null; draw(); return; }
+      stepSeg();
+    }
+    requestAnimationFrame(tick);
+  }
+
+  function onEnterRoom(id){
+    const r = roomById(id);
+    const secrets = (S.adj.get(id)||[]).filter(e=>e.type==='secret' && !e.revealed);
+    if(secrets.length && Math.random()<0.35){
+      const e = secrets[Math.floor(Math.random()*secrets.length)];
+      e.revealed = true;
+      const back = (S.adj.get(e.to)||[]).find(x=>x.to===id && x.type==='secret');
+      if(back) back.revealed = true;
+      document.getElementById('hint').textContent = "A faint draft betrays a hidden door…";
+      SFX.bleep(760);
+    }
+    if(r.key && !S.hasKey){
+      S.hasKey = true; r.key=false;
+      const el = document.getElementById('keyStatus'); el.textContent="Key held"; el.className="flag ok";
+      document.getElementById('hint').textContent = "You found the key. Seek the stairs down.";
+      SFX.bleep(900);
+    }
+    if(r.monster){
+      r.monster=false;
+      document.getElementById('hint').textContent = "A monster lurks… (combat stub to come).";
+      SFX.bleep(680);
+    }
+    if(r.chest){
+      r.chest=false;
+      const gold = randRange(8,45);
+      INV.gold += gold; Inventory.save(INV);
+      document.getElementById('goldAmt').textContent = INV.gold;
+      SFX.bleep(840); alert(`Treasure! +${gold} gold`);
+    }
+    if(r.down){
+      if(S.hasKey){
+        document.getElementById('hint').textContent = "You descend to the next level…";
+        SFX.bleep(820);
+        setTimeout(()=>generate(true), 350);
+      }else{
+        document.getElementById('hint').textContent = "A heavy gate bars the stairs. You need the key.";
+        SFX.bleep(300);
+      }
+    }
+  }
+
+  /* ---------- Search ---------- */
+  function doSearch(){
+    const cur = S.curId;
+    const secrets = (S.adj.get(cur)||[]).filter(e=>e.type==='secret' && !e.revealed);
+    if(!secrets.length){ document.getElementById('hint').textContent="You search… nothing unusual."; SFX.bleep(400); draw(); return; }
+    secrets.forEach(e=>{
+      e.revealed=true;
+      const back = (S.adj.get(e.to)||[]).find(x=>x.to===cur && x.type==='secret'); if(back) back.revealed=true;
+    });
+    document.getElementById('hint').textContent="Secret seams reveal hidden paths.";
+    SFX.bleep(760); draw();
+  }
+
+  /* ---------- hover logic (highlight + ghost path) ---------- */
+  function pickRoomAtWorld(wx,wy){
+    for(const r of S.rooms){ if(wx>=r.x && wx<=r.x+r.w && wy>=r.y && wy<=r.y+r.h) return r; }
+    return null;
+  }
+  canvas.addEventListener('mousemove', (ev)=>{
+    if(S.anim) return; // no hover while animating
+    const rect = canvas.getBoundingClientRect();
+    const px = ev.clientX - rect.left, py = ev.clientY - rect.top;
+    const w = screenToWorld(px,py);
+    const r = pickRoomAtWorld(w.x,w.y);
+
+    let newHoverId = null, newPath = null, reachable=false, cursor='crosshair';
+    if(r){
+      const vis = visibleSet();
+      const clickable = vis.has(r.id) || S.visited.has(r.id);
+      if(clickable){
+        newHoverId = r.id; cursor='pointer';
+        newPath = path(S.curId, r.id);
+        reachable = !!newPath && newPath.length>1;
+      }
+    }
+    S.hoverId = newHoverId;
+    S.hoverPath = newPath;
+    S.hoverReachable = reachable;
+    canvas.style.cursor = cursor;
+    draw();
+  });
+  canvas.addEventListener('mouseleave', ()=>{ S.hoverId=null; S.hoverPath=null; canvas.style.cursor='crosshair'; draw(); });
+
+  /* ---------- draw ---------- */
+  function draw(){
+    const dpr = window.devicePixelRatio||1;
+    const rect = canvas.getBoundingClientRect();
+    if(canvas.width !== Math.floor(rect.width*dpr) || canvas.height !== Math.floor(rect.height*dpr)){
+      canvas.width = Math.floor(rect.width*dpr); canvas.height=Math.floor(rect.height*dpr);
+      ctx.setTransform(dpr,0,0,dpr,0,0);
+      computeView();
+    }
+
+    const w=rect.width, h=rect.height;
+    ctx.clearRect(0,0,w,h);
+    ctx.fillStyle = "#0f0a18"; ctx.fillRect(0,0,w,h);
+    const vg = ctx.createRadialGradient(w/2,h/2, Math.min(w,h)*0.2, w/2,h/2, Math.max(w,h)*0.7);
+    vg.addColorStop(0,"rgba(246,210,107,0.06)"); vg.addColorStop(1,"rgba(0,0,0,0.65)");
+    ctx.fillStyle = vg; ctx.fillRect(0,0,w,h);
+
+    const vis = visibleSet();
+
+    // connections (visible only)
+    ctx.lineWidth = 4; ctx.strokeStyle = "#4a356c";
+    S.rooms.forEach(r=>{
+      if(!vis.has(r.id)) return;
+      const a = worldToScreen(r.cx, r.cy);
+      (S.adj.get(r.id)||[]).forEach(e=>{
+        if(e.type==='secret' && !e.revealed) return;
+        if(!vis.has(e.to)) return;
+        const b = worldToScreen(roomById(e.to).cx, roomById(e.to).cy);
+        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+      });
+    });
+
+    // ghost path preview (draw beneath rooms border but above connections)
+    if(S.hoverPath){
+      const pts = S.hoverPath.map(id=>worldToScreen(roomById(id).cx, roomById(id).cy));
+      ctx.save();
+      ctx.lineWidth = 5;
+      ctx.setLineDash([10,8]);
+      ctx.strokeStyle = S.hoverReachable ? "rgba(99,210,151,0.9)" : "rgba(255,88,104,0.9)";
+      ctx.beginPath();
+      ctx.moveTo(pts[0].x, pts[0].y);
+      for(let i=1;i<pts.length;i++){ ctx.lineTo(pts[i].x, pts[i].y); }
+      ctx.stroke();
+      ctx.setLineDash([]);
+      // waypoints dots
+      ctx.fillStyle = S.hoverReachable ? "rgba(99,210,151,0.9)" : "rgba(255,88,104,0.9)";
+      pts.forEach(p=>{ ctx.beginPath(); ctx.arc(p.x,p.y,5,0,Math.PI*2); ctx.fill(); });
+      ctx.restore();
+    }
+
+    // rooms
+    S.rooms.forEach(r=>{
+      const RS = worldToScreen(r.x, r.y);
+      const RE = worldToScreen(r.x+r.w, r.y+r.h);
+      const rx=RS.x, ry=RS.y, rw=RE.x-RS.x, rh=RE.y-RS.y;
+
+      const isHover = (S.hoverId===r.id && (S.hoverPath || S.visited.has(r.id)));
+      if(vis.has(r.id)){
+        ctx.fillStyle="#231b34"; ctx.fillRect(rx,ry,rw,rh);
+        // glow if hovered
+        if(isHover){
+          ctx.save();
+          ctx.shadowColor = S.hoverReachable ? "#63d297" : "#ff5868";
+          ctx.shadowBlur = 18; ctx.fillStyle = "rgba(255,255,255,0.06)";
+          ctx.fillRect(rx,ry,rw,rh); ctx.restore();
+        }
+        ctx.strokeStyle="#6b4e10"; ctx.lineWidth=6; ctx.strokeRect(rx,ry,rw,rh);
+
+        // door markers
+        for(const e of S.adj.get(r.id)||[]){
+          const n = roomById(e.to); if(!n) continue;
+          const cx = r.cx, cy = r.cy, nx = n.cx, ny = n.cy;
+          let px,py;
+          if(Math.abs(nx - (r.x+r.w/2)) > Math.abs(ny - (r.y+r.h/2))){ px = (nx>cx)? r.x+r.w : r.x; py = r.y+r.h/2; }
+          else{ px = r.x+r.w/2; py = (ny>cy)? r.y+r.h : r.y; }
+          const p = worldToScreen(px,py);
+          if(e.type==='secret' && !e.revealed){
+            if(S.visited.has(r.id)){ ctx.fillStyle="rgba(99,210,151,0.08)"; ctx.fillRect(p.x-6,p.y-6,12,12); }
+          }else{
+            ctx.fillStyle="#f6d26b"; ctx.fillRect(p.x-6,p.y-6,12,12);
+          }
+        }
+
+        // features
+        const c = worldToScreen(r.cx,r.cy);
+        if(r.up) drawStairs(c.x,c.y,true);
+        if(r.down) drawStairs(c.x,c.y,false,!S.hasKey);
+        if(r.key && !S.hasKey) drawKey(c.x,c.y-8);
+        if(r.monster) drawMonster(c.x-10,c.y-10);
+        if(r.chest) drawChest(c.x+10,c.y+6);
+      }else if(S.visited.has(r.id)){
+        ctx.fillStyle="#1a1327"; ctx.fillRect(rx,ry,rw,rh);
+        ctx.strokeStyle="#3b2a56"; ctx.lineWidth=4; ctx.strokeRect(rx,ry,rw,rh);
+      }
+    });
+
+    // player
+    const P = worldToScreen(S.player.x,S.player.y);
+    ctx.fillStyle = "#63d297"; ctx.beginPath(); ctx.arc(P.x, P.y, 9, 0, Math.PI*2); ctx.fill();
+    ctx.strokeStyle = "#f6d26b"; ctx.lineWidth = 3; ctx.strokeRect(P.x-7, P.y-13, 14, 7);
+
+    const r = roomById(S.curId);
+    document.getElementById('coordLabel').textContent = `Room ${S.curId+1}  (${S.visited.size} explored)`;
+  }
+
+  function drawStairs(x,y,up=true,locked=false){
+    ctx.fillStyle = up ? "#a7b2c3" : "#f6d26b";
+    for(let i=0;i<4;i++) ctx.fillRect(x-16, y-8+i*5, 32-i*6, 3);
+    if(!up && locked){ ctx.fillStyle="rgba(255,88,104,0.45)"; ctx.fillRect(x-18,y-14,36,28); }
+  }
+  function drawKey(x,y){
+    ctx.fillStyle="#ffd966"; ctx.fillRect(x-8,y-2,16,4);
+    ctx.beginPath(); ctx.arc(x-10,y,6,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle="#120e1c"; ctx.beginPath(); ctx.arc(x-10,y,3,0,Math.PI*2); ctx.fill();
+  }
+  function drawMonster(x,y){
+    ctx.fillStyle="#ff5868"; ctx.fillRect(x,y,20,20);
+    ctx.fillStyle="#120e1c"; ctx.fillRect(x+3,y+5,4,4); ctx.fillRect(x+13,y+5,4,4);
+  }
+  function drawChest(x,y){
+    ctx.fillStyle="#d9b37d"; ctx.fillRect(x-12,y-8,24,16);
+    ctx.fillStyle="#614c3b"; ctx.fillRect(x-12,y-12,24,6);
+    ctx.fillStyle="#f6d26b"; ctx.fillRect(x-2,y-2,4,6);
+  }
+
+  /* ---------- input: click & keys ---------- */
+  canvas.addEventListener('click', (ev)=>{
+    if(S.anim) return;
+    if(S.hoverPath && S.hoverReachable && S.hoverPath.length>1){
+      beginMove(S.hoverPath);
+    }
+  });
+  document.addEventListener('keydown', (e)=>{
+    if(S.anim) return;
+    if(e.key==='r'||e.key==='R'){ generate(false); return; }
+    if(e.key==='e'||e.key==='E'){ doSearch(); return; }
+    let dir=null;
+    if(['ArrowUp','w','W'].includes(e.key)) dir='N';
+    else if(['ArrowDown','s','S'].includes(e.key)) dir='S';
+    else if(['ArrowLeft','a','A'].includes(e.key)) dir='W';
+    else if(['ArrowRight','d','D'].includes(e.key)) dir='E';
+    if(!dir) return;
+
+    const cur = roomById(S.curId);
+    const opts = (S.adj.get(S.curId)||[]).filter(e=>!(e.type==='secret' && !e.revealed)).map(e=>roomById(e.to));
+    const want = {N:o=>o.cy<cur.cy, S:o=>o.cy>cur.cy, W:o=>o.cx<cur.cx, E:o=>o.cx>cur.cx}[dir];
+    const cand = opts.filter(want); if(!cand.length) return;
+    let best=cand[0], dBest=Infinity;
+    cand.forEach(o=>{ const d=Math.hypot(o.cx-cur.cx,o.cy-cur.cy); if(d<dBest){ dBest=d; best=o; } });
+    beginMove([S.curId, best.id]);
+  });
+
+  /* ---------- generate, fit, boot ---------- */
+  function generate(levelUp=false){
+    if(levelUp) S.level++;
+    const leaves=[]; splitLeaf({x:WORLD.x,y:WORLD.y,w:WORLD.w,h:WORLD.h},0,leaves);
+    S.rooms = makeRooms(leaves);
+    connectRooms(S.rooms);
+    specials();
+    populate();
+
+    document.getElementById('levelNum').textContent = S.level;
+    document.getElementById('lvlLabel').textContent = S.level;
+    const k = document.getElementById('keyStatus'); k.textContent="Not found"; k.className="flag";
+    document.getElementById('hint').textContent="Hover any visible room to preview the path.";
+
+    computeView(); draw(); SFX.bleep(720);
+  }
+  function fitCanvas(){
+    const dpr = window.devicePixelRatio||1;
+    const wrap = document.querySelector('.mapCanvasWrap').getBoundingClientRect();
+    canvas.width = Math.floor(wrap.width*dpr);
+    canvas.height = Math.floor(Math.min(wrap.height, 760)*dpr);
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+    computeView(); draw();
+  }
+  window.addEventListener('resize', fitCanvas);
+
+  function init(){ fitCanvas(); generate(false); }
+
+  // export hook
+  window.game = window.game || {};
+  window.game.getLevelState = ()=>({
+    level:S.level, hasKey:S.hasKey, currentRoom:S.curId,
+    visited:[...S.visited],
+    edges:Object.fromEntries([...S.adj.entries()].map(([k,v])=>[k, v.map(e=>({to:e.to,type:e.type,revealed:e.revealed}))]))
+  });
+
+  return { init };
+})();
+
+/* ---------- boot & placeholders ---------- */
+Dungeon.init();
+document.getElementById('inventoryBtn').addEventListener('click', ()=>alert('Inventory coming soon.\n(Gold persists already.)'));
+document.getElementById('settingsBtn').addEventListener('click', ()=>alert('Settings coming soon.'));
+</script>
+</body>
+</html>

@@ -1,175 +1,626 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Character Creation</title>
-  <style>
-    body {
-      font-family: 'Arial', sans-serif;
-      background-color: #1b1b1b;
-      color: #f8f8f8;
-      text-align: center;
-    }
-    .container {
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      height: 100vh;
-      flex-direction: column;
-    }
-    .carousel {
-      display: flex;
-      justify-content: center;
-      gap: 20px;
-    }
-    .carousel img {
-      width: 100px;
-      cursor: pointer;
-    }
-    .character-description {
-      margin-top: 20px;
-      font-size: 1.2em;
-      font-weight: bold;
-    }
-    .stats {
-      margin-top: 30px;
-      display: flex;
-      justify-content: center;
-      gap: 15px;
-      font-size: 1.2em;
-    }
-    .stat {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-    }
-    .stat input {
-      margin-top: 5px;
-      width: 50px;
-    }
-    .description {
-      font-style: italic;
-    }
-    .button {
-      background-color: #4CAF50;
-      color: white;
-      padding: 10px 20px;
-      border: none;
-      border-radius: 5px;
-      cursor: pointer;
-      margin-top: 20px;
-    }
-  </style>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Retro RPG – Character Creation</title>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#e9e5d0;           /* parchment ink */
+    --bg:#1a1224;            /* deep night purple */
+    --panel:#2a1d3c;         /* panel base */
+    --panel-hi:#3a2a56;      /* panel highlight */
+    --gold:#f6d26b;          /* UI gold */
+    --emerald:#63d297;       /* accent */
+    --crimson:#ff5868;       /* negative accent */
+    --shadow:0 8px 0 #120b1b, 0 12px 0 #0f0916;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0;
+    background:
+      radial-gradient(1200px 600px at 30% -10%, #3f2c65 0%, transparent 60%),
+      radial-gradient(1200px 600px at 120% 110%, #2b1f45 0%, transparent 60%),
+      var(--bg);
+    color:var(--ink);
+    font-family:"VT323", monospace;
+    letter-spacing:.2px;
+    image-rendering:pixelated;
+  }
+  .crt::after{
+    /* subtle CRT scanlines */
+    content:"";
+    position:fixed; inset:0;
+    pointer-events:none;
+    background:repeating-linear-gradient(0deg, rgba(255,255,255,.03) 0 2px, transparent 2px 4px);
+    mix-blend-mode:soft-light;
+  }
+
+  .wrap{
+    max-width:1100px; margin:30px auto; padding:16px;
+  }
+
+  header{
+    display:flex; align-items:center; gap:12px; margin-bottom:16px;
+  }
+  .title{
+    font-family:"Press Start 2P", system-ui;
+    font-size:22px; line-height:1.2; color:var(--gold);
+    text-shadow:2px 2px 0 #6b4e10, 4px 4px 0 #2a1d3c;
+  }
+  .subtitle{opacity:.85}
+
+  .screen{
+    display:grid; grid-template-columns: 420px 1fr; gap:16px;
+  }
+
+  /* Left column: sprite + carousel */
+  .left{
+    background:linear-gradient(#2b1f45,#1d1430);
+    border:4px solid #6b4e10; border-image: linear-gradient(180deg,#a9842b,#6b4e10) 1;
+    border-radius:14px;
+    padding:14px;
+    box-shadow:var(--shadow);
+    position:relative;
+  }
+  .frame{
+    aspect-ratio:1/1; background:linear-gradient(#181024,#0d0816);
+    display:grid; place-items:center; border:3px solid #49336f;
+    border-radius:10px; margin-bottom:12px;
+  }
+  canvas.big{ width: 96%; height: 96%; image-rendering: pixelated; }
+
+  .carousel{
+    display:grid; grid-template-columns: 40px 1fr 40px; gap:8px; align-items:center;
+  }
+  .thumbs{
+    display:flex; gap:8px; overflow:auto; padding:4px;
+    background:#211632; border:2px solid #49336f; border-radius:10px;
+  }
+  .thumb{ width:72px; height:72px; flex:0 0 auto; display:grid; place-items:center; border:2px solid transparent; border-radius:8px; cursor:pointer }
+  .thumb.active{ border-color:var(--gold); background:#2e2242 }
+  canvas.sml{ width:64px; height:64px; }
+
+  .navbtn{
+    height:40px; width:40px; display:grid; place-items:center;
+    background:#211632; border:2px solid #49336f; border-radius:8px;
+    cursor:pointer; color:var(--gold); font-family:"Press Start 2P";
+  }
+  .navbtn:active{ transform:translateY(2px) }
+
+  /* Right column: info + stats */
+  .right{
+    display:grid; grid-template-rows:auto auto 1fr auto; gap:12px;
+  }
+  .panel{
+    background:linear-gradient(#342452,#231838);
+    border:4px solid #6b4e10; border-image: linear-gradient(180deg,#a9842b,#6b4e10) 1;
+    border-radius:14px; padding:14px; box-shadow:var(--shadow);
+  }
+  .name{ font-family:"Press Start 2P"; font-size:18px; color:var(--gold); margin:0 0 6px }
+  .classline{ color:var(--emerald); margin:0 0 10px; font-size:20px }
+  .flavor{ opacity:.95; font-size:20px }
+  .backstory{ margin-top:10px; opacity:.85; font-size:18px }
+
+  .stats{
+    display:grid; grid-template-columns: repeat(5, 1fr); gap:10px;
+  }
+  .stat{
+    background:linear-gradient(#2b1f45,#1d1430);
+    border:3px solid #49336f; border-radius:12px; padding:10px;
+    display:grid; gap:6px; justify-items:center;
+  }
+  .stat label{ font-family:"Press Start 2P"; font-size:12px; color:var(--gold); }
+  .row{
+    display:flex; gap:6px; align-items:center; justify-content:center;
+  }
+  .btn{
+    font-family:"Press Start 2P"; font-size:12px;
+    background:#211632; color:var(--ink); border:2px solid #49336f; border-radius:8px;
+    padding:8px; line-height:1; cursor:pointer;
+  }
+  .btn:active{ transform:translateY(2px) }
+  .val{ min-width:28px; text-align:center; font-size:18px }
+
+  .meter{
+    background:#20142e; border:3px solid #49336f; border-radius:12px; padding:8px;
+    display:flex; align-items:center; gap:10px; justify-content:space-between;
+  }
+  .bar{ flex:1; height:14px; background:#140d21; border:2px solid #49336f; border-radius:10px; overflow:hidden }
+  .fill{ height:100%; background:linear-gradient(90deg, #f6d26b, #63d297); width:0% }
+  .remain{ font-family:"Press Start 2P"; color:var(--gold); font-size:12px }
+
+  .actions{
+    display:flex; gap:10px; flex-wrap:wrap; justify-content:flex-end;
+  }
+  .cta{
+    font-family:"Press Start 2P"; font-size:14px; letter-spacing:1px;
+    background:linear-gradient(#f6d26b,#b68b2f);
+    color:#2a1d3c; border:0; border-radius:12px; padding:12px 16px; cursor:pointer;
+    box-shadow:var(--shadow);
+  }
+  .cta.secondary{
+    background:linear-gradient(#5b8a73,#346b56); color:#091318;
+  }
+  .cta.warn{
+    background:linear-gradient(#ff7d88,#b43a47); color:#2a0e13;
+  }
+  .cta:disabled{ opacity:.6; cursor:not-allowed }
+
+  footer{
+    margin-top:12px; opacity:.75; text-align:center; font-size:14px;
+  }
+
+  /* Accessibility focus */
+  .navbtn:focus, .btn:focus, .cta:focus, .thumb:focus{ outline:3px dashed var(--emerald); outline-offset:2px }
+
+  /* Small screens */
+  @media (max-width: 980px){
+    .screen{ grid-template-columns:1fr; }
+  }
+</style>
 </head>
-<body>
+<body class="crt">
 
-  <div class="container">
-    <h1>Character Creation</h1>
+<div class="wrap">
+  <header>
+    <div class="title">CHARACTER FORGE</div>
+    <div class="subtitle">Choose your hero • Spend your points • Begin the crawl</div>
+  </header>
 
-    <!-- Carousel of character sprites -->
-    <div class="carousel">
-      <img src="paladin.png" alt="Paladin" id="paladin" onclick="selectCharacter('paladin')">
-      <img src="wizard.png" alt="Wizard" id="wizard" onclick="selectCharacter('wizard')">
-      <img src="assassin.png" alt="Assassin" id="assassin" onclick="selectCharacter('assassin')">
-      <img src="warrior.png" alt="Warrior" id="warrior" onclick="selectCharacter('warrior')">
-      <img src="nerd.png" alt="Nerd" id="nerd" onclick="selectCharacter('nerd')">
-    </div>
+  <div class="screen" role="region" aria-label="Character creation">
+    <!-- LEFT: Sprite + Carousel -->
+    <section class="left" aria-label="Sprite and carousel">
+      <div class="frame" aria-live="polite">
+        <canvas class="big" id="bigCanvas" width="256" height="256"></canvas>
+      </div>
 
-    <div class="character-description" id="description">
-      <p>Select a character to begin!</p>
-    </div>
+      <div class="carousel">
+        <button class="navbtn" id="prevBtn" aria-label="Previous character">◀</button>
+        <div class="thumbs" id="thumbs" role="tablist" aria-label="Characters"></div>
+        <button class="navbtn" id="nextBtn" aria-label="Next character">▶</button>
+      </div>
+    </section>
 
-    <!-- Character stats allocation -->
-    <div class="stats">
-      <div class="stat">
-        <p>Health</p>
-        <input type="number" id="health" value="10" min="1" max="20" onchange="updateStats()">
+    <!-- RIGHT: Info + Stats -->
+    <section class="right">
+      <div class="panel">
+        <h2 class="name" id="name">—</h2>
+        <div class="classline" id="classline">—</div>
+        <div class="flavor" id="flavor">—</div>
+        <div class="backstory" id="backstory">—</div>
       </div>
-      <div class="stat">
-        <p>Attack</p>
-        <input type="number" id="attack" value="10" min="1" max="20" onchange="updateStats()">
-      </div>
-      <div class="stat">
-        <p>Defense</p>
-        <input type="number" id="defense" value="10" min="1" max="20" onchange="updateStats()">
-      </div>
-      <div class="stat">
-        <p>Magic</p>
-        <input type="number" id="magic" value="10" min="1" max="20" onchange="updateStats()">
-      </div>
-      <div class="stat">
-        <p>Agility</p>
-        <input type="number" id="agility" value="10" min="1" max="20" onchange="updateStats()">
-      </div>
-    </div>
 
-    <!-- Confirmation button -->
-    <button class="button" onclick="confirmCharacter()">Confirm Character</button>
+      <div class="panel meter" aria-live="polite">
+        <div class="remain">Points left: <span id="pointsLeft">10</span> / 20</div>
+        <div class="bar" aria-hidden="true"><div class="fill" id="fill"></div></div>
+      </div>
+
+      <div class="panel stats" id="stats"></div>
+
+      <div class="actions">
+        <button class="cta secondary" id="randomBtn">Randomise</button>
+        <button class="cta secondary" id="resetBtn">Reset</button>
+        <button class="cta warn" id="saveBtn">Save Hero</button>
+        <button class="cta" id="startBtn" disabled>Start Adventure ▶</button>
+      </div>
+    </section>
   </div>
 
-  <script>
-    let selectedCharacter = null;
-    let remainingPoints = 20;
+  <footer>Tip: use ← → to switch heroes, and +/- keys to tweak the highlighted stat.</footer>
+</div>
 
-    const descriptions = {
-      paladin: "The Human Paladin is a noble warrior who uses both sword and shield to protect the weak. Known for their honor and courage.",
-      wizard: "The Elf Wizard wields the arcane arts, casting powerful spells to defeat enemies from a distance. Their magic is unmatched.",
-      assassin: "The Half-Elf Assassin is stealthy and deadly, relying on agility and precision to eliminate foes without being detected.",
-      warrior: "The Dwarf Warrior is a sturdy tank, with a deep love for battle and a resistance to damage. His axe is his life.",
-      nerd: "The Human Nerd is far from conventional, but their knowledge of technology and strategy can prove more powerful than brute force."
-    };
+<script>
+/* ---------- Tiny bleep for retro feedback ---------- */
+const SFX = {
+  bleep(freq=660, dur=0.05){
+    try{
+      const ctx = new (window.AudioContext||window.webkitAudioContext)();
+      const o = ctx.createOscillator(); const g = ctx.createGain();
+      o.connect(g); g.connect(ctx.destination);
+      o.type = "square"; o.frequency.value = freq;
+      g.gain.setValueAtTime(0.08, ctx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + dur);
+      o.start(); o.stop(ctx.currentTime + dur + 0.01);
+    }catch(e){}
+  }
+};
 
-    const baseStats = {
-      paladin: { health: 10, attack: 7, defense: 8, magic: 4, agility: 1 },
-      wizard: { health: 7, attack: 4, defense: 4, magic: 10, agility: 5 },
-      assassin: { health: 8, attack: 8, defense: 4, magic: 3, agility: 7 },
-      warrior: { health: 12, attack: 6, defense: 9, magic: 2, agility: 3 },
-      nerd: { health: 9, attack: 5, defense: 4, magic: 5, agility: 7 }
-    };
-
-    function selectCharacter(character) {
-      selectedCharacter = character;
-      document.getElementById("description").innerHTML = `<p>${descriptions[character]}</p>`;
-      updateStats();
+/* ---------- Sprite system: 16x16 maps, char palette ---------- */
+function drawPixelSprite(canvas, map, palette, scale=16){
+  const ctx = canvas.getContext('2d');
+  const size = map.length; // 16
+  canvas.width = size*scale; canvas.height = size*scale;
+  ctx.imageSmoothingEnabled = false;
+  for(let y=0;y<size;y++){
+    const row = map[y];
+    for(let x=0;x<size;x++){
+      const c = row[x];
+      if(c === '.') continue; // transparent
+      ctx.fillStyle = palette[c] || '#000';
+      ctx.fillRect(x*scale, y*scale, scale, scale);
     }
+  }
+}
 
-    function updateStats() {
-      if (selectedCharacter) {
-        const stats = baseStats[selectedCharacter];
-        let totalAllocated = 0;
-        let statsInputs = ["health", "attack", "defense", "magic", "agility"];
-        
-        statsInputs.forEach(stat => {
-          totalAllocated += parseInt(document.getElementById(stat).value);
-        });
+/* Palette legend:
+   . transparent
+   s skin, h hair, a armor/metal, g gold, c cloak/cloth, w white, b boots/leather,
+   m magic aura, d dark/trim, r red/crimson, e emerald/green, n nerdy bits (blue)
+*/
+const PALETTES = {
+  paladin: {s:"#f3c9a6", h:"#5a4126", a:"#a7b2c3", g:"#f6d26b", c:"#5e6a8a", w:"#e9e5d0", b:"#6b4e10", d:"#2b2f3a"},
+  wizard : {s:"#eec6a8", h:"#dbbfff", a:"#7e7bb3", g:"#caa4ff", c:"#5c3ca3", w:"#f8f6ff", b:"#3b2c66", m:"#63d297", d:"#24173e"},
+  assassin:{s:"#d9b89e", h:"#2b2f3a", a:"#495464", g:"#9aa7b2", c:"#1f2530", w:"#e5e7eb", b:"#2c3a48", r:"#ff5868", d:"#151a22"},
+  warrior: {s:"#e8b894", h:"#7a4f28", a:"#8a6d4b", g:"#d9b37d", c:"#614c3b", w:"#e9e5d0", b:"#5a3a22", d:"#2a1d13"},
+  nerd   : {s:"#eac6ad", h:"#232b36", a:"#9db4c0", g:"#f6d26b", c:"#3da5ff", w:"#ffffff", b:"#2b3e50", n:"#6de2f8", d:"#1b2430"}
+};
 
-        // Ensure total stats don't exceed 20 points
-        if (totalAllocated > 20) {
-          alert("You can only allocate a total of 20 points!");
-          return;
-        }
+/* 16x16 char maps (very simple icon silhouettes) */
+const MAPS = {
+  paladin: [
+  "..wwwwww........",
+  ".wssssssw.......",
+  ".wshsshsw.......",
+  ".wssssssw.......",
+  "..wssssw........",
+  "...cccc.........",
+  "..caaaaac.......",
+  ".caggggaac......",
+  ".caggggaac..ww..",
+  ".caaaaaaac.wggw.",
+  "..caccac...wggw.",
+  "..b.b..b....ww..",
+  "..b.b..b........",
+  "...b..b.........",
+  "....dd..........",
+  "....dd.........."
+  ],
+  wizard: [
+  "......mmmmm.....",
+  ".....mmmmm......",
+  "......mmmm......",
+  "....wsssssww....",
+  "...wshsshsw.....",
+  "...wsssssww.....",
+  ".....cccc.......",
+  "....ccccc.......",
+  "...cccccmm......",
+  "...caaaacm......",
+  "...cawawc.......",
+  "...caaaac.......",
+  "....b...b.......",
+  "....b...b.......",
+  ".....d.d........",
+  ".....d.d........"
+  ],
+  assassin: [
+  "......rrrr......",
+  ".....rccccr.....",
+  "......r..r......",
+  "...wsssssww.....",
+  "..wshsshsw......",
+  "..wsssssww......",
+  "...cccccc.......",
+  "..caaaaaac......",
+  "..caa..aac..r...",
+  "...caccac..rr...",
+  "....b..b..r.....",
+  "....b..b.r......",
+  ".....b.b........",
+  ".....b.b........",
+  ".....d..........",
+  ".....d.........."
+  ],
+  warrior: [
+  ".......d........",
+  "...wwdssdww.....",
+  "..wssshsssw.....",
+  "..wsssssssw.....",
+  "...wsssssww.....",
+  "....ccccc.......",
+  "...caaaaac......",
+  "..caggggaac.....",
+  "..caaaaaaac.....",
+  "...caccac.......",
+  "....b..b..d.....",
+  "....b..b..d.....",
+  ".....b.b........",
+  ".....b.b........",
+  "......d.........",
+  "......d........."
+  ],
+  nerd: [
+  ".....wwwwww.....",
+  "....wsh..hsw....",
+  "....wswwwwsw....",
+  "....wssn nsw....",
+  ".....wssssw.....",
+  "......cccc......",
+  ".....caaaaac....",
+  "....cawggwac....",
+  "....caaaaaac....",
+  ".....caccac.....",
+  "......b..b......",
+  "......b..b......",
+  ".....b....b.....",
+  ".....b....b.....",
+  "......d..d......",
+  "......d..d......"
+  ]
+};
 
-        // Update the base stats after allocation
-        statsInputs.forEach(stat => {
-          const statValue = parseInt(document.getElementById(stat).value);
-          baseStats[selectedCharacter][stat] = statValue;
-        });
+/* ---------- Game data ---------- */
+const CLASSES = [
+  {
+    key:'paladin',
+    name:'Sir Aurek the Stalwart',
+    clazz:'Human Paladin',
+    flavor:'Shining armor, dim sense of irony. Smiles at danger (and small dogs).',
+    backstory:'Knighted at Dawnspire after reciting the Oath of Radiance from memory—twice. Swore to defend the weak, smite the wicked, and return the Library’s overdue shield.',
+    base:{ Health:4, Attack:2, Defense:3, Magic:0, Agility:1 } // 10 total
+  },
+  {
+    key:'wizard',
+    name:'Lyriel of the Sidereal Fold',
+    clazz:'Elf Wizard',
+    flavor:'Speaks twelve arcane dialects and one normal one (begrudgingly).',
+    backstory:'Exiled from the Mooncolleges for “unorthodox spell-storage” (they used jam jars). Seeks relic pages of the Astral Cookbook: Recipes & Rifts.',
+    base:{ Health:1, Attack:0, Defense:1, Magic:7, Agility:1 }
+  },
+  {
+    key:'assassin',
+    name:'Shade of Halftide',
+    clazz:'Half-Elf Assassin',
+    flavor:'Moves like a whisper, bills like a consultant.',
+    backstory:'Raised by gulls on the roofs of Halftide. Took the Vow of Quiet Things: no clanking armor, no creaky doors, no small talk.',
+    base:{ Health:2, Attack:4, Defense:1, Magic:0, Agility:3 }
+  },
+  {
+    key:'warrior',
+    name:'Bromm Ironkettle',
+    clazz:'Dwarf Warrior',
+    flavor:'If it can’t be solved with an axe, try two axes.',
+    backstory:'Champion of the Caskring Pits. Wields “Tab”—an axe with a running bar tab. Bromm’s here to settle both.',
+    base:{ Health:5, Attack:3, Defense:2, Magic:0, Agility:0 }
+  },
+  {
+    key:'nerd',
+    name:'Edwin from Accounts',
+    clazz:'Human Nerd',
+    flavor:'Min-maxed life choices. Speaks fluent patch notes.',
+    backstory:'Summoned here after spilling energy drink on an ancient keyboard. Wields the Artifact of Spreadsheeting: infinite formulas, questionable ethics.',
+    base:{ Health:2, Attack:1, Defense:2, Magic:3, Agility:2 }
+  }
+];
+
+const STAT_KEYS = ["Health","Attack","Defense","Magic","Agility"];
+const TOTAL_POINTS = 20; // base (10) + allocatable (10)
+
+/* ---------- State ---------- */
+const state = {
+  index:0,
+  // per-character working stats (start at base)
+  working: new Map(), // key -> stats object
+};
+
+/* ---------- Elements ---------- */
+const bigCanvas = document.getElementById('bigCanvas');
+const thumbsEl = document.getElementById('thumbs');
+const nameEl = document.getElementById('name');
+const classEl = document.getElementById('classline');
+const flavorEl = document.getElementById('flavor');
+const storyEl = document.getElementById('backstory');
+const statsEl = document.getElementById('stats');
+const leftEl  = document.getElementById('pointsLeft');
+const fillEl  = document.getElementById('fill');
+const prevBtn = document.getElementById('prevBtn');
+const nextBtn = document.getElementById('nextBtn');
+const randomBtn = document.getElementById('randomBtn');
+const resetBtn = document.getElementById('resetBtn');
+const saveBtn = document.getElementById('saveBtn');
+const startBtn = document.getElementById('startBtn');
+
+/* ---------- Build thumbnails ---------- */
+function buildThumbs(){
+  thumbsEl.innerHTML = "";
+  CLASSES.forEach((c, i)=>{
+    const wrap = document.createElement('button');
+    wrap.className = "thumb";
+    wrap.setAttribute("role","tab");
+    wrap.setAttribute("aria-label", c.name);
+    const cnv = document.createElement('canvas');
+    cnv.className = "sml"; cnv.width = 64; cnv.height = 64;
+    wrap.appendChild(cnv);
+    wrap.addEventListener('click', ()=>setIndex(i));
+    thumbsEl.appendChild(wrap);
+    // draw
+    drawPixelSprite(cnv, MAPS[c.key], PALETTES[c.key], 4);
+  });
+}
+
+/* ---------- Render current ---------- */
+function pointsUsed(stats){
+  return STAT_KEYS.reduce((a,k)=>a+stats[k],0);
+}
+function pointsLeft(stats){
+  return TOTAL_POINTS - pointsUsed(stats);
+}
+function clamp(val,min,max){ return Math.max(min, Math.min(max, val)); }
+
+function renderCurrent(){
+  const c = CLASSES[state.index];
+  const palette = PALETTES[c.key];
+  drawPixelSprite(bigCanvas, MAPS[c.key], palette, 16);
+
+  document.querySelectorAll('.thumb').forEach((el,i)=>{
+    el.classList.toggle('active', i===state.index);
+  });
+
+  nameEl.textContent = c.name;
+  classEl.textContent = c.clazz;
+  flavorEl.textContent = c.flavor;
+  storyEl.textContent = c.backstory;
+
+  // stats panel
+  statsEl.innerHTML = "";
+  const stats = getWorking(c.key);
+  const left = pointsLeft(stats);
+  leftEl.textContent = left.toString();
+
+  const pct = (pointsUsed(stats)/TOTAL_POINTS)*100;
+  fillEl.style.width = pct + "%";
+
+  STAT_KEYS.forEach((k, i)=>{
+    const panel = document.createElement('div'); panel.className="stat";
+    const label = document.createElement('label'); label.textContent = k; panel.appendChild(label);
+
+    const row = document.createElement('div'); row.className = "row"; panel.appendChild(row);
+    const minus = document.createElement('button'); minus.className="btn"; minus.textContent = "−"; minus.title = "Decrease " + k;
+    const val = document.createElement('div'); val.className="val"; val.textContent = stats[k];
+    const plus = document.createElement('button'); plus.className="btn"; plus.textContent = "+"; plus.title = "Increase " + k;
+    row.append(minus,val,plus);
+
+    const baseMin = CLASSES[state.index].base[k]; // can't go below base
+    minus.addEventListener('click', ()=>{
+      if(stats[k] > baseMin){
+        stats[k] = clamp(stats[k]-1, baseMin, 20);
+        SFX.bleep(360);
+        renderCurrent();
       }
-    }
-
-    function confirmCharacter() {
-      if (selectedCharacter) {
-        alert(`You have selected the ${selectedCharacter} with the following stats:\n` +
-              `Health: ${baseStats[selectedCharacter].health}\n` +
-              `Attack: ${baseStats[selectedCharacter].attack}\n` +
-              `Defense: ${baseStats[selectedCharacter].defense}\n` +
-              `Magic: ${baseStats[selectedCharacter].magic}\n` +
-              `Agility: ${baseStats[selectedCharacter].agility}`);
-      } else {
-        alert("Please select a character first!");
+    });
+    plus.addEventListener('click', ()=>{
+      if(pointsLeft(stats)>0 && stats[k] < 20){
+        stats[k] = clamp(stats[k]+1, baseMin, 20);
+        SFX.bleep(720);
+        renderCurrent();
       }
+    });
+
+    // keyboard support: +/- act on last clicked stat
+    panel.tabIndex = 0;
+    panel.addEventListener('focus', ()=> { statsEl.dataset.focus = k; });
+
+    statsEl.appendChild(panel);
+  });
+
+  // controls enablement
+  startBtn.disabled = pointsLeft(stats) !== 0;
+}
+
+/* ---------- Working stats helpers ---------- */
+function cloneBase(base){
+  return Object.fromEntries(Object.entries(base).map(([k,v])=>[k, v]));
+}
+function getWorking(key){
+  if(!state.working.has(key)){
+    // load from localStorage if exists
+    const saved = localStorage.getItem('rpg_working_'+key);
+    if(saved){
+      try{
+        const parsed = JSON.parse(saved);
+        const base = CLASSES.find(c=>c.key===key).base;
+        // ensure min = base
+        STAT_KEYS.forEach(k=> parsed[k] = Math.max(parsed[k]??base[k], base[k]));
+        state.working.set(key, parsed);
+        return parsed;
+      }catch(e){}
     }
-  </script>
+    state.working.set(key, cloneBase(CLASSES.find(c=>c.key===key).base));
+  }
+  return state.working.get(key);
+}
+function persistWorking(key){
+  const s = getWorking(key);
+  localStorage.setItem('rpg_working_'+key, JSON.stringify(s));
+}
+
+/* ---------- Selection & navigation ---------- */
+function setIndex(i){
+  state.index = (i+CLASSES.length)%CLASSES.length;
+  renderCurrent();
+}
+prevBtn.addEventListener('click', ()=>{ setIndex(state.index-1); SFX.bleep(280); });
+nextBtn.addEventListener('click', ()=>{ setIndex(state.index+1); SFX.bleep(280); });
+
+document.addEventListener('keydown', (e)=>{
+  const focusStat = statsEl.dataset.focus;
+  if(e.key === 'ArrowLeft'){ setIndex(state.index-1); }
+  if(e.key === 'ArrowRight'){ setIndex(state.index+1); }
+  if((e.key === '+' || e.key === '=') && focusStat){
+    const s = getWorking(CLASSES[state.index].key);
+    if(pointsLeft(s)>0 && s[focusStat] < 20){ s[focusStat]++; renderCurrent(); SFX.bleep(720); }
+  }
+  if((e.key === '-' || e.key === '_') && focusStat){
+    const baseMin = CLASSES[state.index].base[focusStat];
+    const s = getWorking(CLASSES[state.index].key);
+    if(s[focusStat] > baseMin){ s[focusStat]--; renderCurrent(); SFX.bleep(360); }
+  }
+});
+
+/* ---------- Randomise & Reset ---------- */
+randomBtn.addEventListener('click', ()=>{
+  const key = CLASSES[state.index].key;
+  const s = getWorking(key);
+  // reset to base first
+  STAT_KEYS.forEach(k=> s[k] = CLASSES[state.index].base[k]);
+  let left = pointsLeft(s); // 10
+  while(left>0){
+    const k = STAT_KEYS[Math.floor(Math.random()*STAT_KEYS.length)];
+    if(s[k] < 20){ s[k]++; left--; }
+  }
+  SFX.bleep(900);
+  persistWorking(key);
+  renderCurrent();
+});
+
+resetBtn.addEventListener('click', ()=>{
+  const key = CLASSES[state.index].key;
+  state.working.set(key, cloneBase(CLASSES[state.index].base));
+  localStorage.removeItem('rpg_working_'+key);
+  SFX.bleep(500);
+  renderCurrent();
+});
+
+/* ---------- Save + Export ---------- */
+saveBtn.addEventListener('click', ()=>{
+  const c = CLASSES[state.index];
+  const stats = getWorking(c.key);
+  persistWorking(c.key);
+  const hero = {
+    key:c.key, name:c.name, class:c.clazz,
+    flavor:c.flavor, backstory:c.backstory,
+    stats: {...stats}, // Health/Attack/Defense/Magic/Agility
+    createdAt: new Date().toISOString()
+  };
+  localStorage.setItem('rpgCharacter', JSON.stringify(hero));
+  console.log("Saved hero:", hero);
+  alert("Saved!\n(Open the console to see your hero JSON.)");
+  SFX.bleep(640);
+});
+
+startBtn.addEventListener('click', ()=>{
+  const c = CLASSES[state.index];
+  const stats = getWorking(c.key);
+  if(pointsLeft(stats) !== 0){ return; }
+  const hero = {
+    key:c.key, name:c.name, class:c.clazz,
+    flavor:c.flavor, backstory:c.backstory,
+    stats:{...stats}, createdAt:new Date().toISOString()
+  };
+  localStorage.setItem('rpgCharacter', JSON.stringify(hero));
+  window.game = window.game || {};
+  window.game.getSelectedCharacter = ()=>hero;
+  alert("Adventure awaits! (Hook this button to your next screen.)");
+  SFX.bleep(820);
+});
+
+/* ---------- Init ---------- */
+buildThumbs();
+setIndex(0);
+renderCurrent();
+</script>
 </body>
 </html>
