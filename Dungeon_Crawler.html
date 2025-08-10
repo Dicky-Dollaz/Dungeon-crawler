@@ -196,7 +196,8 @@ function saveInventory(hero, inv){ localStorage.setItem(invKey(hero), JSON.strin
 /* ===========================
    APP STATE + NAV
 =========================== */
-const App = { mode:'creator', hero:null, inventory:null, current:{screen:null, api:null} };
+const App = { mode:'creator', hero:null, inventory:null, current:{screen:null, api:null}, mapState:null };
+
 
 function mount(screenName, api){
   // cleanup
@@ -214,17 +215,55 @@ function goCreator(selectHeroId=null){
 }
 function goMap(fresh=false){
   App.mode='map';
-  const api = MapScreen.mount(root, App.hero, (room)=>{ // onEncounter
-    const count = 1 + Math.floor(Math.random()*3);
-    goBattle({ enemies:'slime', count, sourceRoomId: room.id, seed: Math.floor(Math.random()*1e9) });
-  }, ()=>{/* onDescend handled inside map */}, ()=>{ // onSpendPoints
-    openSpendPointsModal(App.hero, ()=>{ // onClose
-      // refresh sidebar bars after spending
-      if(App.current.api && App.current.api.refreshHeroPanel) App.current.api.refreshHeroPanel();
-    });
-  }, fresh);
+  const api = MapScreen.mount(
+    root,
+    App.hero,
+    (room)=>{ // onEncounter
+      // capture map state BEFORE leaving for battle
+      if (App.current.api && typeof App.current.api.serialize === 'function') {
+        App.mapState = App.current.api.serialize();
+      }
+      const count = 1 + Math.floor(Math.random()*3);
+      goBattle({ enemies:'slime', count, sourceRoomId: room.id, seed: Math.floor(Math.random()*1e9) });
+    },
+    function serialize(){
+  return {
+    level: S.level,
+    rooms: S.rooms.map(r=>({
+      id:r.id,x:r.x,y:r.y,w:r.w,h:r.h,cx:r.cx,cy:r.cy,
+      up:r.up,down:r.down,key:r.key,monster:r.monster,chest:r.chest
+    })),
+    adj: Array.from(S.adj.entries()).map(([id,edges])=>[
+      id, edges.map(e=>({to:e.to,type:e.type,revealed:e.revealed}))
+    ]),
+    curId:S.curId, startId:S.startId, exitId:S.exitId, keyId:S.keyId,
+    visited:[...S.visited], entered:[...S.entered], hasKey:S.hasKey,
+    player:{x:S.player.x,y:S.player.y}
+  };
+}
+function hydrate(data){
+  S.level = data.level||1;
+  S.rooms = (data.rooms||[]).map(r=>({...r}));
+  S.adj = new Map((data.adj||[]).map(([id,edges])=>[+id, edges.map(e=>({...e}))]));
+  S.curId = data.curId; S.startId=data.startId; S.exitId=data.exitId; S.keyId=data.keyId;
+  S.visited = new Set(data.visited||[]); S.entered = new Set(data.entered||[]); S.hasKey=!!data.hasKey;
+  S.player = { x: data.player?.x ?? roomById(S.curId).cx, y: data.player?.y ?? roomById(S.curId).cy };
+  document.getElementById('levelNum').textContent = S.level; lvlLabel.textContent=S.level;
+  hint.textContent = "Continue exploring.";
+  computeView(); draw();
+}
+    ()=>{/* onDescend handled inside map */},
+    ()=>{ // onSpendPoints
+      openSpendPointsModal(App.hero, ()=>{
+        if(App.current.api && App.current.api.refreshHeroPanel) App.current.api.refreshHeroPanel();
+      });
+    },
+    fresh,
+    App.mapState              // <-- pass saved map state back in
+  );
   mount('map', api);
 }
+
 function goBattle(config){
   App.mode='battle';
   const api = CombatScreen.mount(root, App.hero, App.inventory, config, (result)=>{
@@ -652,7 +691,8 @@ const CharacterCreator = (function(){
    MODULE: Map Screen
 =========================== */
 const MapScreen = (function(){
-  function mount(container, hero, onEncounter, onDescend, onSpendPoints, fresh){
+function mount(container, hero, onEncounter, onDescend, onSpendPoints, fresh, savedState){
+
     container.innerHTML='';
     const screen = document.createElement('div'); screen.className='grid3';
 
@@ -675,8 +715,17 @@ const MapScreen = (function(){
     const buttons = document.createElement('div'); buttons.style.display='grid'; buttons.style.gap='8px';
     const invBtn = document.createElement('button'); invBtn.className='btn'; invBtn.textContent='Inventory';
     const spendBtn = document.createElement('button'); spendBtn.className='btn'; spendBtn.textContent='Spend Points';
+    const exitBtn = document.createElement('button'); exitBtn.className='btn warn'; exitBtn.textContent='Character Forge';
+exitBtn.onclick = ()=>{
+  // persist current hero/inventory; clear ephemeral map
+  saveHeroActive(hero);
+  const invNow = loadInventory(hero); saveInventory(hero, invNow);
+  App.mapState = null; // new run will start fresh
+  goCreator(hero.id);  // jump back to selection with this hero highlighted
+};
+
     const hint = document.createElement('div'); hint.style.fontSize='18px'; hint.id='hint'; hint.textContent='Hover a visible room to preview the path.';
-    buttons.append(invBtn, spendBtn);
+    buttons.append(invBtn, spendBtn, exitBtn);
 
     side.append(heroCard, infoRow, buttons, hint);
 
@@ -1114,7 +1163,19 @@ const MapScreen = (function(){
     }
 
     // FIX: wait a frame for layout, then size + generate
-    requestAnimationFrame(() => { fitCanvas(); generate(false); });
+    requestAnimationFrame(() => {
+  fitCanvas();
+  if (fresh) {
+    const m = computeMaxFromStats(hero.stats);
+    hero.hp = m.maxHP; hero.mp = m.maxMP; saveHeroActive(hero);
+    generate(false);
+  } else if (savedState) {
+    hydrate(savedState);
+  } else {
+    generate(false);
+  }
+});
+
 
     // events
     canvas.addEventListener('mousemove', onMouseMove);
@@ -1126,16 +1187,16 @@ const MapScreen = (function(){
     ro.observe(canvasWrap);
 
     return {
-      destroy(){
-        cancelAnimationFrame(animReq);
-        canvas.removeEventListener('mousemove', onMouseMove);
-        canvas.removeEventListener('click', onClick);
-        window.removeEventListener('resize', fitCanvas);
-        ro.disconnect();
-        document.removeEventListener('keydown', onKeyDown);
-      },
-      refreshHeroPanel
-    };
+  destroy(){
+    cancelAnimationFrame(animReq);
+    canvas.removeEventListener('mousemove', onMouseMove);
+    canvas.removeEventListener('click', onClick);
+    window.removeEventListener('resize', fitCanvas);
+    document.removeEventListener('keydown', onKeyDown);
+  },
+  refreshHeroPanel,
+  serialize
+};
   }
 
   return { mount };
