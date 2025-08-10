@@ -226,32 +226,6 @@ function goMap(fresh=false){
       const count = 1 + Math.floor(Math.random()*3);
       goBattle({ enemies:'slime', count, sourceRoomId: room.id, seed: Math.floor(Math.random()*1e9) });
     },
-    function serialize(){
-  return {
-    level: S.level,
-    rooms: S.rooms.map(r=>({
-      id:r.id,x:r.x,y:r.y,w:r.w,h:r.h,cx:r.cx,cy:r.cy,
-      up:r.up,down:r.down,key:r.key,monster:r.monster,chest:r.chest
-    })),
-    adj: Array.from(S.adj.entries()).map(([id,edges])=>[
-      id, edges.map(e=>({to:e.to,type:e.type,revealed:e.revealed}))
-    ]),
-    curId:S.curId, startId:S.startId, exitId:S.exitId, keyId:S.keyId,
-    visited:[...S.visited], entered:[...S.entered], hasKey:S.hasKey,
-    player:{x:S.player.x,y:S.player.y}
-  };
-}
-function hydrate(data){
-  S.level = data.level||1;
-  S.rooms = (data.rooms||[]).map(r=>({...r}));
-  S.adj = new Map((data.adj||[]).map(([id,edges])=>[+id, edges.map(e=>({...e}))]));
-  S.curId = data.curId; S.startId=data.startId; S.exitId=data.exitId; S.keyId=data.keyId;
-  S.visited = new Set(data.visited||[]); S.entered = new Set(data.entered||[]); S.hasKey=!!data.hasKey;
-  S.player = { x: data.player?.x ?? roomById(S.curId).cx, y: data.player?.y ?? roomById(S.curId).cy };
-  document.getElementById('levelNum').textContent = S.level; lvlLabel.textContent=S.level;
-  hint.textContent = "Continue exploring.";
-  computeView(); draw();
-}
     ()=>{/* onDescend handled inside map */},
     ()=>{ // onSpendPoints
       openSpendPointsModal(App.hero, ()=>{
@@ -1558,6 +1532,32 @@ const CombatScreen = (function(){
       }else{
         onEnd && onEnd({victory:false});
       }
+    }
+
+    newBtn.onclick = ()=>{ startBattle(); };
+
+    // start
+    startBattle();
+
+    return {
+      destroy(){ cancelAnimationFrame(raf); /* all listeners are on buttons in DOM we discard */ }
+    };
+  }
+
+  return { mount };
+})();
+
+/* ===========================
+   BOOT
+=========================== */
+(function boot(){
+  const existing = loadHeroActive();
+  if(existing){ App.hero = existing; App.inventory = loadInventory(existing); goMap(true); }
+  else{ goCreator(); }
+})();
+</script>
+</body>
+</html>
     }
 
     newBtn.onclick = ()=>{ startBattle(); };
